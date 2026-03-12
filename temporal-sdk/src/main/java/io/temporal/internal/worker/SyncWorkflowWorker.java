@@ -232,7 +232,22 @@ public class SyncWorkflowWorker implements SuspendableWorker {
     return null;
   }
 
-  @Override
+  public TrackingSlotSupplier<WorkflowSlotInfo> getWorkflowSlotSupplier() {
+    return workflowWorker.getSlotSupplier();
+  }
+
+  public TrackingSlotSupplier<LocalActivitySlotInfo> getLocalActivitySlotSupplier() {
+    return laWorker.getSlotSupplier();
+  }
+
+  public void setShutdownHeartbeat(io.temporal.api.worker.v1.WorkerHeartbeat heartbeat) {
+    workflowWorker.setShutdownHeartbeat(heartbeat);
+  }
+
+  public boolean hasStickyQueue() {
+    return workflowWorker.hasStickyQueue();
+  }
+
   public String toString() {
     return String.format(
         "SyncWorkflowWorker{namespace=%s, taskQueue=%s, identity=%s}",

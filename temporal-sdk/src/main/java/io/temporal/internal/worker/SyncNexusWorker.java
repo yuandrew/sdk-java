@@ -93,6 +93,10 @@ public class SyncNexusWorker implements SuspendableWorker {
     return worker.isTerminated();
   }
 
+  public TrackingSlotSupplier<NexusSlotInfo> getSlotSupplier() {
+    return worker.getSlotSupplier();
+  }
+
   @Override
   public WorkerLifecycleState getLifecycleState() {
     return worker.getLifecycleState();

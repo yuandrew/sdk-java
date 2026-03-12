@@ -211,6 +211,10 @@ final class ActivityWorker implements SuspendableWorker {
     return pollerOptions;
   }
 
+  public TrackingSlotSupplier<ActivitySlotInfo> getSlotSupplier() {
+    return slotSupplier;
+  }
+
   @Override
   public String toString() {
     return String.format(

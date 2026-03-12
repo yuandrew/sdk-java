@@ -54,6 +54,7 @@ final class WorkflowWorker implements SuspendableWorker {
   private final GrpcRetryer grpcRetryer;
   private final EagerActivityDispatcher eagerActivityDispatcher;
   private final TrackingSlotSupplier<WorkflowSlotInfo> slotSupplier;
+  private volatile io.temporal.api.worker.v1.WorkerHeartbeat shutdownHeartbeat;
 
   private PollTaskExecutor<WorkflowTask> pollTaskExecutor;
 
@@ -212,16 +213,17 @@ final class WorkflowWorker implements SuspendableWorker {
         pollerShutdown.thenCompose(
             ignore -> {
               if (!interruptTasks && stickyTaskQueueName != null) {
+                ShutdownWorkerRequest.Builder shutdownReq =
+                    ShutdownWorkerRequest.newBuilder()
+                        .setIdentity(options.getIdentity())
+                        .setNamespace(namespace)
+                        .setStickyTaskQueue(stickyTaskQueueName)
+                        .setReason(GRACEFUL_SHUTDOWN_MESSAGE);
+                if (shutdownHeartbeat != null) {
+                  shutdownReq.setWorkerHeartbeat(shutdownHeartbeat);
+                }
                 return shutdownManager.waitOnWorkerShutdownRequest(
-                    service
-                        .futureStub()
-                        .shutdownWorker(
-                            ShutdownWorkerRequest.newBuilder()
-                                .setIdentity(options.getIdentity())
-                                .setNamespace(namespace)
-                                .setStickyTaskQueue(stickyTaskQueueName)
-                                .setReason(GRACEFUL_SHUTDOWN_MESSAGE)
-                                .build()));
+                    service.futureStub().shutdownWorker(shutdownReq.build()));
               }
               return CompletableFuture.completedFuture(null);
             }),
@@ -331,6 +333,22 @@ final class WorkflowWorker implements SuspendableWorker {
                     slotPermit,
                     options.getDeploymentOptions()))
         .orElse(null);
+  }
+
+  public void setShutdownHeartbeat(io.temporal.api.worker.v1.WorkerHeartbeat heartbeat) {
+    this.shutdownHeartbeat = heartbeat;
+  }
+
+  public TrackingSlotSupplier<WorkflowSlotInfo> getSlotSupplier() {
+    return slotSupplier;
+  }
+
+  public boolean hasStickyQueue() {
+    return stickyTaskQueueName != null;
+  }
+
+  public String getStickyTaskQueueName() {
+    return stickyTaskQueueName;
   }
 
   @Override

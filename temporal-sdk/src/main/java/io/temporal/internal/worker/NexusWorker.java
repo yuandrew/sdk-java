@@ -199,6 +199,10 @@ final class NexusWorker implements SuspendableWorker {
     return pollerOptions;
   }
 
+  public TrackingSlotSupplier<NexusSlotInfo> getSlotSupplier() {
+    return slotSupplier;
+  }
+
   @Override
   public String toString() {
     return String.format(

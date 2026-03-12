@@ -5,6 +5,10 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.uber.m3.tally.Scope;
 import com.uber.m3.util.ImmutableMap;
+import io.temporal.api.enums.v1.WorkerStatus;
+import io.temporal.api.worker.v1.WorkerHeartbeat;
+import io.temporal.api.worker.v1.WorkerHostInfo;
+import io.temporal.api.worker.v1.WorkerSlotsInfo;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
 import io.temporal.common.Experimental;
@@ -17,11 +21,15 @@ import io.temporal.internal.sync.WorkflowInternal;
 import io.temporal.internal.sync.WorkflowThreadExecutor;
 import io.temporal.internal.worker.*;
 import io.temporal.serviceclient.MetricsTag;
+import io.temporal.serviceclient.Version;
 import io.temporal.worker.tuning.*;
 import io.temporal.workflow.Functions;
 import io.temporal.workflow.Functions.Func;
 import io.temporal.workflow.WorkflowMethod;
+import java.lang.management.ManagementFactory;
+import java.net.InetAddress;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -29,6 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import org.slf4j.Logger;
@@ -47,6 +56,10 @@ public final class Worker {
   final SyncActivityWorker activityWorker;
   final SyncNexusWorker nexusWorker;
   private final AtomicBoolean started = new AtomicBoolean();
+  private final String workerInstanceKey = UUID.randomUUID().toString();
+  private final Instant startTime = Instant.now();
+  private final WorkflowClientOptions clientOptions;
+  private final @Nonnull WorkflowExecutorCache cache;
 
   /**
    * Creates worker that connects to an instance of the Temporal Service.
@@ -77,6 +90,8 @@ public final class Worker {
         !Strings.isNullOrEmpty(taskQueue), "taskQueue should not be an empty string");
     this.taskQueue = taskQueue;
     this.options = WorkerOptions.newBuilder(options).validateAndBuildWithDefaults();
+    this.clientOptions = client.getOptions();
+    this.cache = cache;
     factoryOptions = WorkerFactoryOptions.newBuilder(factoryOptions).validateAndBuildWithDefaults();
     WorkflowClientOptions clientOptions = client.getOptions();
     String namespace = clientOptions.getNamespace();
@@ -446,6 +461,81 @@ public final class Worker {
     }
     timeoutMillis = ShutdownManager.awaitTermination(nexusWorker, timeoutMillis);
     ShutdownManager.awaitTermination(workflowWorker, timeoutMillis);
+  }
+
+  String getWorkerInstanceKey() {
+    return workerInstanceKey;
+  }
+
+  Supplier<WorkerHeartbeat> buildHeartbeatCallback(WorkerStatus status, String workerGroupingKey) {
+    return () -> {
+      WorkerHeartbeat.Builder hb =
+          WorkerHeartbeat.newBuilder()
+              .setWorkerInstanceKey(workerInstanceKey)
+              .setWorkerIdentity(clientOptions.getIdentity())
+              .setTaskQueue(taskQueue)
+              .setSdkName(Version.SDK_NAME)
+              .setSdkVersion(Version.LIBRARY_VERSION)
+              .setStatus(status)
+              .setStartTime(toProtoTimestamp(startTime))
+              .setHeartbeatTime(toProtoTimestamp(Instant.now()));
+
+      hb.setHostInfo(buildHostInfo(workerGroupingKey));
+
+      hb.setWorkflowTaskSlotsInfo(buildSlotsInfo(workflowWorker.getWorkflowSlotSupplier()));
+
+      if (activityWorker != null) {
+        hb.setActivityTaskSlotsInfo(buildSlotsInfo(activityWorker.getSlotSupplier()));
+      }
+
+      hb.setLocalActivitySlotsInfo(buildSlotsInfo(workflowWorker.getLocalActivitySlotSupplier()));
+
+      hb.setNexusTaskSlotsInfo(buildSlotsInfo(nexusWorker.getSlotSupplier()));
+
+      // Sticky cache stats
+      hb.setTotalStickyCacheHit(cache.getCacheHits());
+      hb.setTotalStickyCacheMiss(cache.getCacheMisses());
+      hb.setCurrentStickyCacheSize(cache.getCurrentCacheSize());
+
+      return hb.build();
+    };
+  }
+
+  private static WorkerSlotsInfo buildSlotsInfo(TrackingSlotSupplier<?> tracker) {
+    int maxSlots = tracker.maximumSlots().orElse(-1);
+    int usedSlots = tracker.getUsedSlotCount();
+    return WorkerSlotsInfo.newBuilder()
+        .setCurrentAvailableSlots(maxSlots >= 0 ? maxSlots - usedSlots : 0)
+        .setCurrentUsedSlots(usedSlots)
+        .setSlotSupplierKind(tracker.getSupplierKind())
+        .build();
+  }
+
+  private static WorkerHostInfo buildHostInfo(String workerGroupingKey) {
+    String hostName;
+    try {
+      hostName = InetAddress.getLocalHost().getHostName();
+    } catch (Exception e) {
+      hostName = "unknown";
+    }
+    return WorkerHostInfo.newBuilder()
+        .setHostName(hostName)
+        .setWorkerGroupingKey(workerGroupingKey)
+        .setProcessId(getProcessId())
+        .build();
+  }
+
+  private static String getProcessId() {
+    String name = ManagementFactory.getRuntimeMXBean().getName();
+    int atIndex = name.indexOf('@');
+    return atIndex > 0 ? name.substring(0, atIndex) : "unknown";
+  }
+
+  private static com.google.protobuf.Timestamp toProtoTimestamp(Instant instant) {
+    return com.google.protobuf.Timestamp.newBuilder()
+        .setSeconds(instant.getEpochSecond())
+        .setNanos(instant.getNano())
+        .build();
   }
 
   @Override
