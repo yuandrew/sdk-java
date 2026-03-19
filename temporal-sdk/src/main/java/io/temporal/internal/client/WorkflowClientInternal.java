@@ -23,4 +23,6 @@ public interface WorkflowClientInternal {
 
   @Nullable
   HeartbeatManager getHeartbeatManager();
+
+  void disableHeartbeatManager();
 }

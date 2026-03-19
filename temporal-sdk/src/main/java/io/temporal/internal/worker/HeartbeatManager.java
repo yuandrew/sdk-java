@@ -1,7 +1,6 @@
 package io.temporal.internal.worker;
 
 import io.temporal.api.worker.v1.WorkerHeartbeat;
-import io.temporal.api.workflowservice.v1.DescribeNamespaceResponse;
 import io.temporal.api.workflowservice.v1.RecordWorkerHeartbeatRequest;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import java.time.Duration;
@@ -33,8 +32,6 @@ public class HeartbeatManager {
   private final ConcurrentHashMap<String, Supplier<WorkerHeartbeat>> callbacks =
       new ConcurrentHashMap<>();
 
-  private volatile boolean serverSupportsHeartbeats;
-  private volatile boolean capabilityChecked;
   private volatile Instant lastHeartbeatTime;
 
   @Nullable private ScheduledExecutorService scheduler;
@@ -51,10 +48,6 @@ public class HeartbeatManager {
 
   public String getWorkerGroupingKey() {
     return workerGroupingKey;
-  }
-
-  public boolean isServerSupportsHeartbeats() {
-    return serverSupportsHeartbeats;
   }
 
   /**
@@ -77,7 +70,6 @@ public class HeartbeatManager {
 
   /** Send a one-shot final heartbeat via RecordWorkerHeartbeat RPC. */
   public void sendFinalHeartbeat(WorkerHeartbeat heartbeat) {
-    if (!serverSupportsHeartbeats) return;
     try {
       service
           .blockingStub()
@@ -92,19 +84,6 @@ public class HeartbeatManager {
     }
   }
 
-  /** Check namespace capabilities and cache the result. */
-  public void checkCapability(DescribeNamespaceResponse describeResponse) {
-    this.capabilityChecked = true;
-    this.serverSupportsHeartbeats =
-        describeResponse.getNamespaceInfo().getCapabilities().getWorkerHeartbeats();
-
-    if (!serverSupportsHeartbeats) {
-      log.debug(
-          "Server does not support worker heartbeats for namespace {}, heartbeating disabled",
-          namespace);
-    }
-  }
-
   private void ensureSchedulerRunning() {
     synchronized (lifecycleLock) {
       if (scheduler == null || scheduler.isShutdown()) {
@@ -116,7 +95,7 @@ public class HeartbeatManager {
                   return t;
                 });
         scheduler.scheduleAtFixedRate(
-            this::heartbeatTick, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
+            this::heartbeatTick, 0, interval.toMillis(), TimeUnit.MILLISECONDS);
       }
     }
   }
@@ -140,7 +119,6 @@ public class HeartbeatManager {
   }
 
   private void heartbeatTick() {
-    if (!serverSupportsHeartbeats) return;
     if (callbacks.isEmpty()) return;
 
     try {

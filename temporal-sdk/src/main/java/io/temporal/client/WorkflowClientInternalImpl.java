@@ -54,7 +54,7 @@ final class WorkflowClientInternalImpl implements WorkflowClient, WorkflowClient
   private final Scope metricsScope;
   private final WorkflowClientInterceptor[] interceptors;
   private final WorkerFactoryRegistry workerFactoryRegistry = new WorkerFactoryRegistry();
-  private final @Nullable HeartbeatManager heartbeatManager;
+  private volatile @Nullable HeartbeatManager heartbeatManager;
 
   /**
    * Creates client that connects to an instance of the Temporal Service. Cannot be used from within
@@ -808,6 +808,15 @@ final class WorkflowClientInternalImpl implements WorkflowClient, WorkflowClient
   @Nullable
   public HeartbeatManager getHeartbeatManager() {
     return heartbeatManager;
+  }
+
+  @Override
+  public void disableHeartbeatManager() {
+    HeartbeatManager hb = this.heartbeatManager;
+    if (hb != null) {
+      hb.shutdown();
+      this.heartbeatManager = null;
+    }
   }
 
   @Override

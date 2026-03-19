@@ -263,11 +263,18 @@ public final class WorkerFactory {
                     .setNamespace(workflowClient.getOptions().getNamespace())
                     .build());
 
-    // Check heartbeat capability and register workers
-    HeartbeatManager hbManager =
-        ((WorkflowClientInternal) workflowClient.getInternal()).getHeartbeatManager();
-    if (hbManager != null) {
-      hbManager.checkCapability(describeResponse);
+    // Disable heartbeat manager if the server doesn't support worker heartbeats
+    WorkflowClientInternal clientInternal =
+        (WorkflowClientInternal) workflowClient.getInternal();
+    if (clientInternal.getHeartbeatManager() != null
+        && !describeResponse
+            .getNamespaceInfo()
+            .getCapabilities()
+            .getWorkerHeartbeats()) {
+      log.debug(
+          "Server does not support worker heartbeats for namespace {}, heartbeating disabled",
+          workflowClient.getOptions().getNamespace());
+      clientInternal.disableHeartbeatManager();
     }
 
     // Build plugin execution chain (reverse order for proper nesting)
