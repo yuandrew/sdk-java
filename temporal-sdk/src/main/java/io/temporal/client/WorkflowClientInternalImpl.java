@@ -23,6 +23,7 @@ import io.temporal.internal.client.external.GenericWorkflowClientImpl;
 import io.temporal.internal.client.external.ManualActivityCompletionClientFactory;
 import io.temporal.internal.common.PluginUtils;
 import io.temporal.internal.sync.StubMarker;
+import io.temporal.internal.worker.HeartbeatManager;
 import io.temporal.serviceclient.MetricsTag;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import io.temporal.serviceclient.WorkflowServiceStubsPlugin;
@@ -53,6 +54,7 @@ final class WorkflowClientInternalImpl implements WorkflowClient, WorkflowClient
   private final Scope metricsScope;
   private final WorkflowClientInterceptor[] interceptors;
   private final WorkerFactoryRegistry workerFactoryRegistry = new WorkerFactoryRegistry();
+  private final @Nullable HeartbeatManager heartbeatManager;
 
   /**
    * Creates client that connects to an instance of the Temporal Service. Cannot be used from within
@@ -112,6 +114,18 @@ final class WorkflowClientInternalImpl implements WorkflowClient, WorkflowClient
             options.getNamespace(),
             options.getIdentity(),
             options.getDataConverter());
+
+    java.time.Duration heartbeatInterval = options.getWorkerHeartbeatInterval();
+    if (!heartbeatInterval.isNegative()) {
+      this.heartbeatManager =
+          new HeartbeatManager(
+              workflowServiceStubs,
+              options.getNamespace(),
+              options.getIdentity(),
+              heartbeatInterval);
+    } else {
+      this.heartbeatManager = null;
+    }
   }
 
   private WorkflowClientCallsInterceptor initializeClientInvoker() {
@@ -788,6 +802,12 @@ final class WorkflowClientInternalImpl implements WorkflowClient, WorkflowClient
   @Override
   public void deregisterWorkerFactory(WorkerFactory workerFactory) {
     workerFactoryRegistry.deregister(workerFactory);
+  }
+
+  @Override
+  @Nullable
+  public HeartbeatManager getHeartbeatManager() {
+    return heartbeatManager;
   }
 
   @Override

@@ -4,7 +4,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.uber.m3.tally.Scope;
+import io.temporal.api.enums.v1.WorkerStatus;
 import io.temporal.api.workflowservice.v1.DescribeNamespaceRequest;
+import io.temporal.api.workflowservice.v1.DescribeNamespaceResponse;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
 import io.temporal.common.converter.DataConverter;
@@ -12,6 +14,7 @@ import io.temporal.internal.client.WorkflowClientInternal;
 import io.temporal.internal.common.PluginUtils;
 import io.temporal.internal.sync.WorkflowThreadExecutor;
 import io.temporal.internal.task.VirtualThreadDelegate;
+import io.temporal.internal.worker.HeartbeatManager;
 import io.temporal.internal.worker.ShutdownManager;
 import io.temporal.internal.worker.WorkflowExecutorCache;
 import io.temporal.internal.worker.WorkflowRunLockManager;
@@ -251,13 +254,21 @@ public final class WorkerFactory {
 
     // Workers check and require that Temporal Server is available during start to fail-fast in case
     // of configuration issues.
-    workflowClient
-        .getWorkflowServiceStubs()
-        .blockingStub()
-        .describeNamespace(
-            DescribeNamespaceRequest.newBuilder()
-                .setNamespace(workflowClient.getOptions().getNamespace())
-                .build());
+    DescribeNamespaceResponse describeResponse =
+        workflowClient
+            .getWorkflowServiceStubs()
+            .blockingStub()
+            .describeNamespace(
+                DescribeNamespaceRequest.newBuilder()
+                    .setNamespace(workflowClient.getOptions().getNamespace())
+                    .build());
+
+    // Check heartbeat capability and register workers
+    HeartbeatManager hbManager =
+        ((WorkflowClientInternal) workflowClient.getInternal()).getHeartbeatManager();
+    if (hbManager != null) {
+      hbManager.checkCapability(describeResponse);
+    }
 
     // Build plugin execution chain (reverse order for proper nesting)
     Consumer<WorkerFactory> startChain = WorkerFactory::doStart;
@@ -288,6 +299,18 @@ public final class WorkerFactory {
 
       // Execute the chain for this worker
       startChain.accept(taskQueue, worker);
+    }
+
+    // Register heartbeat callbacks after workers are started
+    HeartbeatManager hbManager =
+        ((WorkflowClientInternal) workflowClient.getInternal()).getHeartbeatManager();
+    if (hbManager != null) {
+      for (Worker worker : workers.values()) {
+        hbManager.registerWorker(
+            worker.getWorkerInstanceKey(),
+            worker.buildHeartbeatCallback(
+                WorkerStatus.WORKER_STATUS_RUNNING, hbManager.getWorkerGroupingKey()));
+      }
     }
 
     state = State.Started;
@@ -376,6 +399,34 @@ public final class WorkerFactory {
 
   /** Internal method that actually shuts down workers. Called from the plugin chain. */
   private void doShutdown(boolean interruptUserTasks) {
+    // Send final heartbeats before shutting down workers
+    HeartbeatManager hbManager =
+        ((WorkflowClientInternal) workflowClient.getInternal()).getHeartbeatManager();
+    if (hbManager != null) {
+      for (Worker worker : workers.values()) {
+        try {
+          boolean hasStickyQueue = worker.workflowWorker.hasStickyQueue();
+          boolean isGraceful = !interruptUserTasks;
+
+          io.temporal.api.worker.v1.WorkerHeartbeat finalHb =
+              worker
+                  .buildHeartbeatCallback(
+                      WorkerStatus.WORKER_STATUS_SHUTTING_DOWN, hbManager.getWorkerGroupingKey())
+                  .get();
+
+          if (isGraceful && hasStickyQueue) {
+            worker.workflowWorker.setShutdownHeartbeat(finalHb);
+          } else {
+            hbManager.sendFinalHeartbeat(finalHb);
+          }
+
+          hbManager.unregisterWorker(worker.getWorkerInstanceKey());
+        } catch (Exception e) {
+          log.debug("Failed to send final heartbeat for worker on {}", worker.getTaskQueue(), e);
+        }
+      }
+    }
+
     ((WorkflowClientInternal) workflowClient.getInternal()).deregisterWorkerFactory(this);
     ShutdownManager shutdownManager = new ShutdownManager();
 

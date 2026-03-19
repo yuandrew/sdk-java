@@ -748,6 +748,10 @@ final class LocalActivityWorker implements Startable, Shutdownable {
     return pollerOptions;
   }
 
+  public TrackingSlotSupplier<LocalActivitySlotInfo> getSlotSupplier() {
+    return slotSupplier;
+  }
+
   public LocalActivityDispatcher getLocalActivityScheduler() {
     return laScheduler;
   }
