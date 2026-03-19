@@ -467,7 +467,7 @@ public final class Worker {
     return workerInstanceKey;
   }
 
-  Supplier<WorkerHeartbeat> buildHeartbeatCallback(WorkerStatus status, String workerGroupingKey) {
+  Supplier<WorkerHeartbeat> buildHeartbeatCallback(String workerGroupingKey) {
     return () -> {
       WorkerHeartbeat.Builder hb =
           WorkerHeartbeat.newBuilder()
@@ -476,7 +476,7 @@ public final class Worker {
               .setTaskQueue(taskQueue)
               .setSdkName(Version.SDK_NAME)
               .setSdkVersion(Version.LIBRARY_VERSION)
-              .setStatus(status)
+              .setStatus(WorkerStatus.WORKER_STATUS_RUNNING)
               .setStartTime(toProtoTimestamp(startTime))
               .setHeartbeatTime(toProtoTimestamp(Instant.now()));
 

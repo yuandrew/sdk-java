@@ -240,8 +240,9 @@ public class SyncWorkflowWorker implements SuspendableWorker {
     return laWorker.getSlotSupplier();
   }
 
-  public void setShutdownHeartbeat(io.temporal.api.worker.v1.WorkerHeartbeat heartbeat) {
-    workflowWorker.setShutdownHeartbeat(heartbeat);
+  public void setHeartbeatSupplier(
+      java.util.function.Supplier<io.temporal.api.worker.v1.WorkerHeartbeat> supplier) {
+    workflowWorker.setHeartbeatSupplier(supplier);
   }
 
   public boolean hasStickyQueue() {

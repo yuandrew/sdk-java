@@ -4,7 +4,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.uber.m3.tally.Scope;
-import io.temporal.api.enums.v1.WorkerStatus;
+import io.temporal.api.worker.v1.WorkerHeartbeat;
 import io.temporal.api.workflowservice.v1.DescribeNamespaceRequest;
 import io.temporal.api.workflowservice.v1.DescribeNamespaceResponse;
 import io.temporal.client.WorkflowClient;
@@ -34,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import org.slf4j.Logger;
@@ -313,10 +314,10 @@ public final class WorkerFactory {
         ((WorkflowClientInternal) workflowClient.getInternal()).getHeartbeatManager();
     if (hbManager != null) {
       for (Worker worker : workers.values()) {
-        hbManager.registerWorker(
-            worker.getWorkerInstanceKey(),
-            worker.buildHeartbeatCallback(
-                WorkerStatus.WORKER_STATUS_RUNNING, hbManager.getWorkerGroupingKey()));
+        Supplier<WorkerHeartbeat> heartbeatSupplier =
+            worker.buildHeartbeatCallback(hbManager.getWorkerGroupingKey());
+        hbManager.registerWorker(worker.getWorkerInstanceKey(), heartbeatSupplier);
+        worker.workflowWorker.setHeartbeatSupplier(heartbeatSupplier);
       }
     }
 
@@ -406,31 +407,12 @@ public final class WorkerFactory {
 
   /** Internal method that actually shuts down workers. Called from the plugin chain. */
   private void doShutdown(boolean interruptUserTasks) {
-    // Send final heartbeats before shutting down workers
+    // Unregister workers from heartbeat manager
     HeartbeatManager hbManager =
         ((WorkflowClientInternal) workflowClient.getInternal()).getHeartbeatManager();
     if (hbManager != null) {
       for (Worker worker : workers.values()) {
-        try {
-          boolean hasStickyQueue = worker.workflowWorker.hasStickyQueue();
-          boolean isGraceful = !interruptUserTasks;
-
-          io.temporal.api.worker.v1.WorkerHeartbeat finalHb =
-              worker
-                  .buildHeartbeatCallback(
-                      WorkerStatus.WORKER_STATUS_SHUTTING_DOWN, hbManager.getWorkerGroupingKey())
-                  .get();
-
-          if (isGraceful && hasStickyQueue) {
-            worker.workflowWorker.setShutdownHeartbeat(finalHb);
-          } else {
-            hbManager.sendFinalHeartbeat(finalHb);
-          }
-
-          hbManager.unregisterWorker(worker.getWorkerInstanceKey());
-        } catch (Exception e) {
-          log.debug("Failed to send final heartbeat for worker on {}", worker.getTaskQueue(), e);
-        }
+        hbManager.unregisterWorker(worker.getWorkerInstanceKey());
       }
     }
 

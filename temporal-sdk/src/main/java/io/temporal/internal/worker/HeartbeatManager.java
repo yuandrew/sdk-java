@@ -60,28 +60,11 @@ public class HeartbeatManager {
   }
 
   /**
-   * Unregister a worker. Does NOT send final heartbeat -- that is handled by the shutdown path.
-   * Stops the scheduler if no workers remain.
+   * Unregister a worker. Stops the scheduler if no workers remain.
    */
   public void unregisterWorker(String workerInstanceKey) {
     callbacks.remove(workerInstanceKey);
     maybeStopScheduler();
-  }
-
-  /** Send a one-shot final heartbeat via RecordWorkerHeartbeat RPC. */
-  public void sendFinalHeartbeat(WorkerHeartbeat heartbeat) {
-    try {
-      service
-          .blockingStub()
-          .recordWorkerHeartbeat(
-              RecordWorkerHeartbeatRequest.newBuilder()
-                  .setNamespace(namespace)
-                  .setIdentity(identity)
-                  .addWorkerHeartbeat(heartbeat)
-                  .build());
-    } catch (Exception e) {
-      log.debug("Failed to send final worker heartbeat", e);
-    }
   }
 
   private void ensureSchedulerRunning() {

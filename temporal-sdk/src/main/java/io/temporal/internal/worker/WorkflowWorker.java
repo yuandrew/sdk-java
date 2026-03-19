@@ -12,6 +12,7 @@ import com.uber.m3.util.ImmutableMap;
 import io.grpc.StatusRuntimeException;
 import io.temporal.api.common.v1.WorkflowExecution;
 import io.temporal.api.enums.v1.QueryResultType;
+import io.temporal.api.enums.v1.WorkerStatus;
 import io.temporal.api.enums.v1.TaskQueueKind;
 import io.temporal.api.enums.v1.WorkflowTaskFailedCause;
 import io.temporal.api.failure.v1.Failure;
@@ -28,6 +29,7 @@ import io.temporal.worker.*;
 import io.temporal.worker.tuning.*;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
@@ -54,7 +56,7 @@ final class WorkflowWorker implements SuspendableWorker {
   private final GrpcRetryer grpcRetryer;
   private final EagerActivityDispatcher eagerActivityDispatcher;
   private final TrackingSlotSupplier<WorkflowSlotInfo> slotSupplier;
-  private volatile io.temporal.api.worker.v1.WorkerHeartbeat shutdownHeartbeat;
+  private volatile Supplier<io.temporal.api.worker.v1.WorkerHeartbeat> heartbeatSupplier;
 
   private PollTaskExecutor<WorkflowTask> pollTaskExecutor;
 
@@ -212,20 +214,24 @@ final class WorkflowWorker implements SuspendableWorker {
     return CompletableFuture.allOf(
         pollerShutdown.thenCompose(
             ignore -> {
-              if (!interruptTasks && stickyTaskQueueName != null) {
-                ShutdownWorkerRequest.Builder shutdownReq =
-                    ShutdownWorkerRequest.newBuilder()
-                        .setIdentity(options.getIdentity())
-                        .setNamespace(namespace)
-                        .setStickyTaskQueue(stickyTaskQueueName)
-                        .setReason(GRACEFUL_SHUTDOWN_MESSAGE);
-                if (shutdownHeartbeat != null) {
-                  shutdownReq.setWorkerHeartbeat(shutdownHeartbeat);
-                }
-                return shutdownManager.waitOnWorkerShutdownRequest(
-                    service.futureStub().shutdownWorker(shutdownReq.build()));
+              ShutdownWorkerRequest.Builder shutdownReq =
+                  ShutdownWorkerRequest.newBuilder()
+                      .setIdentity(options.getIdentity())
+                      .setNamespace(namespace)
+                      .setReason(GRACEFUL_SHUTDOWN_MESSAGE);
+              if (stickyTaskQueueName != null) {
+                shutdownReq.setStickyTaskQueue(stickyTaskQueueName);
               }
-              return CompletableFuture.completedFuture(null);
+              if (heartbeatSupplier != null) {
+                shutdownReq.setWorkerHeartbeat(
+                    heartbeatSupplier
+                        .get()
+                        .toBuilder()
+                        .setStatus(WorkerStatus.WORKER_STATUS_SHUTTING_DOWN)
+                        .build());
+              }
+              return shutdownManager.waitOnWorkerShutdownRequest(
+                  service.futureStub().shutdownWorker(shutdownReq.build()));
             }),
         pollerShutdown
             .thenCompose(
@@ -335,8 +341,9 @@ final class WorkflowWorker implements SuspendableWorker {
         .orElse(null);
   }
 
-  public void setShutdownHeartbeat(io.temporal.api.worker.v1.WorkerHeartbeat heartbeat) {
-    this.shutdownHeartbeat = heartbeat;
+  public void setHeartbeatSupplier(
+      Supplier<io.temporal.api.worker.v1.WorkerHeartbeat> supplier) {
+    this.heartbeatSupplier = supplier;
   }
 
   public TrackingSlotSupplier<WorkflowSlotInfo> getSlotSupplier() {
