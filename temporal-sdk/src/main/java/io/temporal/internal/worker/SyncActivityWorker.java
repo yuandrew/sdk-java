@@ -151,6 +151,18 @@ public class SyncActivityWorker implements SuspendableWorker {
     return worker.getSlotSupplier();
   }
 
+  public HeartbeatTaskCounters getHeartbeatTaskCounters() {
+    return worker.getHeartbeatTaskCounters();
+  }
+
+  public PollerOptions getPollerOptions() {
+    return worker.getPollerOptions();
+  }
+
+  public PollerTracker getPollerTracker() {
+    return worker.getPollerTracker();
+  }
+
   @Override
   public String toString() {
     return String.format(

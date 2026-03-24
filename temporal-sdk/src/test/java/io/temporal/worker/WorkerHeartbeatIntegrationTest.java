@@ -2,7 +2,6 @@ package io.temporal.worker;
 
 import static org.junit.Assert.*;
 
-import io.grpc.*;
 import io.temporal.activity.ActivityInterface;
 import io.temporal.activity.ActivityMethod;
 import io.temporal.activity.ActivityOptions;
@@ -18,14 +17,17 @@ import io.temporal.workflow.Workflow;
 import io.temporal.workflow.WorkflowInterface;
 import io.temporal.workflow.WorkflowMethod;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import org.junit.Assume;
 import org.junit.Rule;
 import org.junit.Test;
 
 public class WorkerHeartbeatIntegrationTest {
+
+  private static final String SKIP_MSG =
+      "No heartbeats captured — test server may not support worker heartbeat capability";
 
   private static final HeartbeatCapturingInterceptor interceptor =
       new HeartbeatCapturingInterceptor();
@@ -41,8 +43,8 @@ public class WorkerHeartbeatIntegrationTest {
               WorkflowClientOptions.newBuilder()
                   .setWorkerHeartbeatInterval(Duration.ofSeconds(1))
                   .build())
-          .setActivityImplementations(new TestActivityImpl())
-          .setWorkflowTypes(TestWorkflowImpl.class)
+          .setActivityImplementations(new TestActivityImpl(), new FailingActivityImpl())
+          .setWorkflowTypes(TestWorkflowImpl.class, FailingWorkflowImpl.class)
           .setDoNotStart(true)
           .build();
 
@@ -51,34 +53,27 @@ public class WorkerHeartbeatIntegrationTest {
     interceptor.clear();
     testWorkflowRule.getTestEnvironment().start();
 
-    // Wait for heartbeat ticks
     Thread.sleep(3000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    // The HeartbeatManager may not send if capability check fails (test server doesn't support it).
-    // But the interceptor captures the request regardless of server response.
-    // If no heartbeats were captured, the test server likely doesn't set capability=true,
-    // and HeartbeatManager correctly skips. This is still valid behavior.
-    if (!requests.isEmpty()) {
-      RecordWorkerHeartbeatRequest req = requests.get(0);
-      assertFalse("namespace should be set", req.getNamespace().isEmpty());
-      assertFalse("identity should be set", req.getIdentity().isEmpty());
-      assertTrue("should have at least one heartbeat", req.getWorkerHeartbeatCount() > 0);
+    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
 
-      io.temporal.api.worker.v1.WorkerHeartbeat hb = req.getWorkerHeartbeat(0);
-      assertEquals("temporal-java", hb.getSdkName());
-      assertFalse("sdk version should be set", hb.getSdkVersion().isEmpty());
-      assertFalse("task queue should be set", hb.getTaskQueue().isEmpty());
-      assertFalse("worker instance key should be set", hb.getWorkerInstanceKey().isEmpty());
-      assertEquals(WorkerStatus.WORKER_STATUS_RUNNING, hb.getStatus());
-      assertTrue("start time should be set", hb.hasStartTime());
-      assertTrue("heartbeat time should be set", hb.hasHeartbeatTime());
-      assertTrue("host info should be set", hb.hasHostInfo());
-      assertFalse(
-          "host name should be set", hb.getHostInfo().getHostName().isEmpty());
-      assertFalse(
-          "process id should be set", hb.getHostInfo().getProcessId().isEmpty());
-    }
+    RecordWorkerHeartbeatRequest req = requests.get(0);
+    assertFalse("namespace should be set", req.getNamespace().isEmpty());
+    assertFalse("identity should be set", req.getIdentity().isEmpty());
+    assertTrue("should have at least one heartbeat", req.getWorkerHeartbeatCount() > 0);
+
+    io.temporal.api.worker.v1.WorkerHeartbeat hb = req.getWorkerHeartbeat(0);
+    assertEquals("temporal-java", hb.getSdkName());
+    assertFalse("sdk version should be set", hb.getSdkVersion().isEmpty());
+    assertFalse("task queue should be set", hb.getTaskQueue().isEmpty());
+    assertFalse("worker instance key should be set", hb.getWorkerInstanceKey().isEmpty());
+    assertEquals(WorkerStatus.WORKER_STATUS_RUNNING, hb.getStatus());
+    assertTrue("start time should be set", hb.hasStartTime());
+    assertTrue("heartbeat time should be set", hb.hasHeartbeatTime());
+    assertTrue("host info should be set", hb.hasHostInfo());
+    assertFalse("host name should be set", hb.getHostInfo().getHostName().isEmpty());
+    assertFalse("process id should be set", hb.getHostInfo().getProcessId().isEmpty());
 
     testWorkflowRule.getTestEnvironment().shutdown();
     testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
@@ -89,33 +84,24 @@ public class WorkerHeartbeatIntegrationTest {
     interceptor.clear();
     testWorkflowRule.getTestEnvironment().start();
 
-    // Wait for at least one heartbeat
     Thread.sleep(2000);
 
     testWorkflowRule.getTestEnvironment().shutdown();
     testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
 
-    // Check if ShutdownWorkerRequest captured (sticky queue is enabled by default)
     List<ShutdownWorkerRequest> shutdownRequests = interceptor.getShutdownRequests();
-    if (!shutdownRequests.isEmpty()) {
-      ShutdownWorkerRequest shutdownReq = shutdownRequests.get(0);
-      if (shutdownReq.hasWorkerHeartbeat()) {
-        assertEquals(
-            WorkerStatus.WORKER_STATUS_SHUTTING_DOWN,
-            shutdownReq.getWorkerHeartbeat().getStatus());
-      }
+    Assume.assumeFalse(SKIP_MSG, shutdownRequests.isEmpty());
+
+    ShutdownWorkerRequest shutdownReq = shutdownRequests.get(0);
+    if (shutdownReq.hasWorkerHeartbeat()) {
+      assertEquals(
+          WorkerStatus.WORKER_STATUS_SHUTTING_DOWN, shutdownReq.getWorkerHeartbeat().getStatus());
     }
   }
 
   @Test
   public void testHeartbeatDisabledNoRpc() throws Exception {
-    // This test verifies that when heartbeat interval is not set, no heartbeat RPCs are sent.
-    // The testWorkflowRule has heartbeating enabled, so we just verify the interceptor works
-    // by checking that without capability, no heartbeats are sent.
-    // Since we can't easily reconfigure the rule, this is a smoke test that the interceptor
-    // captures correctly.
     interceptor.clear();
-    // The interceptor starts empty
     assertTrue(
         "interceptor should start empty after clear", interceptor.getHeartbeatRequests().isEmpty());
   }
@@ -125,7 +111,6 @@ public class WorkerHeartbeatIntegrationTest {
     interceptor.clear();
     testWorkflowRule.getTestEnvironment().start();
 
-    // Run a workflow to generate some activity
     WorkflowClient client = testWorkflowRule.getWorkflowClient();
     TestWorkflow wf =
         client.newWorkflowStub(
@@ -137,28 +122,281 @@ public class WorkerHeartbeatIntegrationTest {
     String result = wf.execute("test");
     assertEquals("done", result);
 
-    // Wait for heartbeats after workflow completion
     Thread.sleep(2000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    if (!requests.isEmpty()) {
-      // Find a heartbeat that has slot info
-      boolean foundSlotInfo =
+    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+
+    boolean foundSlotInfo =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(hb -> hb.hasWorkflowTaskSlotsInfo());
+    if (foundSlotInfo) {
+      io.temporal.api.worker.v1.WorkerHeartbeat hb =
           requests.stream()
               .flatMap(req -> req.getWorkerHeartbeatList().stream())
-              .anyMatch(hb -> hb.hasWorkflowTaskSlotsInfo());
-      if (foundSlotInfo) {
-        io.temporal.api.worker.v1.WorkerHeartbeat hb =
-            requests.stream()
-                .flatMap(req -> req.getWorkerHeartbeatList().stream())
-                .filter(h -> h.hasWorkflowTaskSlotsInfo())
-                .findFirst()
-                .get();
-        assertFalse(
-            "slot supplier kind should be set",
-            hb.getWorkflowTaskSlotsInfo().getSlotSupplierKind().isEmpty());
-      }
+              .filter(h -> h.hasWorkflowTaskSlotsInfo())
+              .findFirst()
+              .get();
+      assertFalse(
+          "slot supplier kind should be set",
+          hb.getWorkflowTaskSlotsInfo().getSlotSupplierKind().isEmpty());
     }
+
+    testWorkflowRule.getTestEnvironment().shutdown();
+    testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
+  }
+
+  @Test
+  public void testTaskCountersInHeartbeat() throws Exception {
+    interceptor.clear();
+    testWorkflowRule.getTestEnvironment().start();
+
+    WorkflowClient client = testWorkflowRule.getWorkflowClient();
+    TestWorkflow wf =
+        client.newWorkflowStub(
+            TestWorkflow.class,
+            WorkflowOptions.newBuilder()
+                .setTaskQueue(testWorkflowRule.getTaskQueue())
+                .setWorkflowExecutionTimeout(Duration.ofSeconds(30))
+                .build());
+    assertEquals("done", wf.execute("test"));
+
+    Thread.sleep(2000);
+
+    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
+    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+
+    boolean foundWorkflowProcessed =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(
+                hb ->
+                    hb.hasWorkflowTaskSlotsInfo()
+                        && hb.getWorkflowTaskSlotsInfo().getTotalProcessedTasks() >= 1);
+    assertTrue(
+        "workflow_task_slots_info.total_processed_tasks should be >= 1", foundWorkflowProcessed);
+
+    boolean foundActivityProcessed =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(
+                hb ->
+                    hb.hasActivityTaskSlotsInfo()
+                        && hb.getActivityTaskSlotsInfo().getTotalProcessedTasks() >= 1);
+    assertTrue(
+        "activity_task_slots_info.total_processed_tasks should be >= 1", foundActivityProcessed);
+
+    testWorkflowRule.getTestEnvironment().shutdown();
+    testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
+  }
+
+  @Test
+  public void testPollerInfoInHeartbeat() throws Exception {
+    interceptor.clear();
+    testWorkflowRule.getTestEnvironment().start();
+
+    Thread.sleep(3000);
+
+    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
+    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+
+    io.temporal.api.worker.v1.WorkerHeartbeat hb = requests.get(0).getWorkerHeartbeat(0);
+    assertTrue(
+        "workflow_poller_info should have current_pollers > 0",
+        hb.hasWorkflowPollerInfo() && hb.getWorkflowPollerInfo().getCurrentPollers() > 0);
+    assertTrue(
+        "activity_poller_info should have current_pollers > 0",
+        hb.hasActivityPollerInfo() && hb.getActivityPollerInfo().getCurrentPollers() > 0);
+    assertTrue("nexus_poller_info should be set", hb.hasNexusPollerInfo());
+    assertTrue(
+        "nexus_poller_info should have current_pollers > 0",
+        hb.getNexusPollerInfo().getCurrentPollers() > 0);
+
+    testWorkflowRule.getTestEnvironment().shutdown();
+    testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
+  }
+
+  @Test
+  public void testHostInfoInHeartbeat() throws Exception {
+    interceptor.clear();
+    testWorkflowRule.getTestEnvironment().start();
+
+    Thread.sleep(3000);
+
+    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
+    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+
+    io.temporal.api.worker.v1.WorkerHeartbeat hb = requests.get(0).getWorkerHeartbeat(0);
+    assertTrue("host_info should be set", hb.hasHostInfo());
+    assertFalse(
+        "host_info.host_name should not be empty", hb.getHostInfo().getHostName().isEmpty());
+    assertFalse(
+        "host_info.process_id should not be empty", hb.getHostInfo().getProcessId().isEmpty());
+    assertFalse(
+        "host_info.worker_grouping_key should not be empty",
+        hb.getHostInfo().getWorkerGroupingKey().isEmpty());
+    assertTrue(
+        "host_info.current_host_cpu_usage should be >= 0",
+        hb.getHostInfo().getCurrentHostCpuUsage() >= 0.0f);
+    assertTrue(
+        "host_info.current_host_mem_usage should be >= 0",
+        hb.getHostInfo().getCurrentHostMemUsage() >= 0.0f);
+
+    testWorkflowRule.getTestEnvironment().shutdown();
+    testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
+  }
+
+  @Test
+  public void testTimestampsInHeartbeat() throws Exception {
+    interceptor.clear();
+    testWorkflowRule.getTestEnvironment().start();
+
+    Thread.sleep(3000);
+
+    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
+    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+
+    io.temporal.api.worker.v1.WorkerHeartbeat hb = requests.get(0).getWorkerHeartbeat(0);
+
+    assertTrue("start_time should be set", hb.hasStartTime());
+    long startTimeSec = hb.getStartTime().getSeconds();
+    long nowSec = java.time.Instant.now().getEpochSecond();
+    assertTrue("start_time should be within 30 seconds of now", nowSec - startTimeSec <= 30);
+
+    assertTrue("heartbeat_time should be set", hb.hasHeartbeatTime());
+    long heartbeatTimeSec = hb.getHeartbeatTime().getSeconds();
+    assertTrue(
+        "heartbeat_time should be within 30 seconds of now", nowSec - heartbeatTimeSec <= 30);
+    assertTrue("heartbeat_time should be >= start_time", heartbeatTimeSec >= startTimeSec);
+
+    if (requests.size() > 1) {
+      io.temporal.api.worker.v1.WorkerHeartbeat hb2 =
+          requests.get(requests.size() - 1).getWorkerHeartbeat(0);
+      assertTrue(
+          "elapsed_since_last_heartbeat should be set on subsequent heartbeats",
+          hb2.hasElapsedSinceLastHeartbeat());
+    }
+
+    testWorkflowRule.getTestEnvironment().shutdown();
+    testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
+  }
+
+  @Test
+  public void testShutdownHeartbeatStatus() throws Exception {
+    interceptor.clear();
+    testWorkflowRule.getTestEnvironment().start();
+
+    Thread.sleep(2000);
+
+    testWorkflowRule.getTestEnvironment().shutdown();
+    testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
+
+    List<ShutdownWorkerRequest> shutdownRequests = interceptor.getShutdownRequests();
+    Assume.assumeFalse(SKIP_MSG, shutdownRequests.isEmpty());
+
+    ShutdownWorkerRequest shutdownReq = shutdownRequests.get(0);
+    assertTrue(
+        "ShutdownWorkerRequest should include a worker_heartbeat",
+        shutdownReq.hasWorkerHeartbeat());
+    assertEquals(
+        "shutdown heartbeat status should be WORKER_STATUS_SHUTTING_DOWN",
+        WorkerStatus.WORKER_STATUS_SHUTTING_DOWN,
+        shutdownReq.getWorkerHeartbeat().getStatus());
+    assertFalse(
+        "shutdown heartbeat task_queue should be set",
+        shutdownReq.getWorkerHeartbeat().getTaskQueue().isEmpty());
+  }
+
+  @Test
+  public void testPluginsInHeartbeat() throws Exception {
+    interceptor.clear();
+    testWorkflowRule.getTestEnvironment().start();
+
+    Thread.sleep(3000);
+
+    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
+    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+
+    io.temporal.api.worker.v1.WorkerHeartbeat hb = requests.get(0).getWorkerHeartbeat(0);
+    assertEquals(
+        "plugins list should be empty when no plugins are configured", 0, hb.getPluginsCount());
+
+    testWorkflowRule.getTestEnvironment().shutdown();
+    testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
+  }
+
+  @Test
+  public void testFailureMetricsInHeartbeat() throws Exception {
+    interceptor.clear();
+    testWorkflowRule.getTestEnvironment().start();
+
+    WorkflowClient client = testWorkflowRule.getWorkflowClient();
+    FailingWorkflow wf =
+        client.newWorkflowStub(
+            FailingWorkflow.class,
+            WorkflowOptions.newBuilder()
+                .setTaskQueue(testWorkflowRule.getTaskQueue())
+                .setWorkflowExecutionTimeout(Duration.ofSeconds(30))
+                .build());
+    try {
+      wf.execute();
+    } catch (Exception e) {
+      // Expected: the activity fails and the workflow fails
+    }
+
+    Thread.sleep(2000);
+
+    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
+    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+
+    boolean foundActivityFailure =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(
+                hb ->
+                    hb.hasActivityTaskSlotsInfo()
+                        && hb.getActivityTaskSlotsInfo().getTotalFailedTasks() >= 1);
+    assertTrue(
+        "activity_task_slots_info.total_failed_tasks should be >= 1 after activity failure",
+        foundActivityFailure);
+
+    testWorkflowRule.getTestEnvironment().shutdown();
+    testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
+  }
+
+  @Test
+  public void testWorkflowTaskProcessedCounts() throws Exception {
+    interceptor.clear();
+    testWorkflowRule.getTestEnvironment().start();
+
+    WorkflowClient client = testWorkflowRule.getWorkflowClient();
+    for (int i = 0; i < 3; i++) {
+      TestWorkflow wf =
+          client.newWorkflowStub(
+              TestWorkflow.class,
+              WorkflowOptions.newBuilder()
+                  .setTaskQueue(testWorkflowRule.getTaskQueue())
+                  .setWorkflowExecutionTimeout(Duration.ofSeconds(30))
+                  .build());
+      assertEquals("done", wf.execute("test" + i));
+    }
+
+    Thread.sleep(2000);
+
+    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
+    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+
+    long maxProcessed =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .filter(io.temporal.api.worker.v1.WorkerHeartbeat::hasWorkflowTaskSlotsInfo)
+            .mapToLong(hb -> hb.getWorkflowTaskSlotsInfo().getTotalProcessedTasks())
+            .max()
+            .orElse(0);
+    assertTrue(
+        "workflow_task_slots_info.total_processed_tasks should be >= 3 after 3 workflows",
+        maxProcessed >= 3);
 
     testWorkflowRule.getTestEnvironment().shutdown();
     testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
@@ -176,9 +414,7 @@ public class WorkerHeartbeatIntegrationTest {
       TestActivity activity =
           Workflow.newActivityStub(
               TestActivity.class,
-              ActivityOptions.newBuilder()
-                  .setStartToCloseTimeout(Duration.ofSeconds(10))
-                  .build());
+              ActivityOptions.newBuilder().setStartToCloseTimeout(Duration.ofSeconds(10)).build());
       return activity.doWork(input);
     }
   }
@@ -196,44 +432,38 @@ public class WorkerHeartbeatIntegrationTest {
     }
   }
 
-  /**
-   * gRPC interceptor that captures heartbeat-related RPCs for test assertions. Captures the request
-   * before the server responds, so tests work even if the test server returns UNIMPLEMENTED.
-   */
-  static class HeartbeatCapturingInterceptor implements ClientInterceptor {
-    private final List<RecordWorkerHeartbeatRequest> heartbeatRequests =
-        Collections.synchronizedList(new ArrayList<>());
-    private final List<ShutdownWorkerRequest> shutdownRequests =
-        Collections.synchronizedList(new ArrayList<>());
+  @WorkflowInterface
+  public interface FailingWorkflow {
+    @WorkflowMethod
+    void execute();
+  }
 
+  public static class FailingWorkflowImpl implements FailingWorkflow {
     @Override
-    public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
-        MethodDescriptor<ReqT, RespT> method, CallOptions callOptions, Channel next) {
-      return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(
-          next.newCall(method, callOptions)) {
-        @Override
-        public void sendMessage(ReqT message) {
-          if (message instanceof RecordWorkerHeartbeatRequest) {
-            heartbeatRequests.add((RecordWorkerHeartbeatRequest) message);
-          } else if (message instanceof ShutdownWorkerRequest) {
-            shutdownRequests.add((ShutdownWorkerRequest) message);
-          }
-          super.sendMessage(message);
-        }
-      };
+    public void execute() {
+      FailingActivity activity =
+          Workflow.newActivityStub(
+              FailingActivity.class,
+              ActivityOptions.newBuilder()
+                  .setStartToCloseTimeout(Duration.ofSeconds(10))
+                  .setRetryOptions(
+                      io.temporal.common.RetryOptions.newBuilder().setMaximumAttempts(1).build())
+                  .build());
+      activity.fail();
     }
+  }
 
-    List<RecordWorkerHeartbeatRequest> getHeartbeatRequests() {
-      return new ArrayList<>(heartbeatRequests);
-    }
+  @ActivityInterface
+  public interface FailingActivity {
+    @ActivityMethod
+    void fail();
+  }
 
-    List<ShutdownWorkerRequest> getShutdownRequests() {
-      return new ArrayList<>(shutdownRequests);
-    }
-
-    void clear() {
-      heartbeatRequests.clear();
-      shutdownRequests.clear();
+  public static class FailingActivityImpl implements FailingActivity {
+    @Override
+    public void fail() {
+      throw io.temporal.failure.ApplicationFailure.newFailure(
+          "intentional failure for test", "TestFailure");
     }
   }
 }

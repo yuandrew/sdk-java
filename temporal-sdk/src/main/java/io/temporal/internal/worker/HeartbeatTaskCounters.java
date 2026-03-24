@@ -3,45 +3,33 @@ package io.temporal.internal.worker;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Thread-safe counters for task processing stats reported in worker heartbeats. Tracks both
- * cumulative totals and per-interval deltas that reset on each heartbeat tick.
+ * Thread-safe counters for task processing stats reported in worker heartbeats. Tracks only
+ * cumulative totals; interval deltas are computed externally by comparing successive snapshots
+ * (same approach as the Go SDK).
  */
 public class HeartbeatTaskCounters {
   private final AtomicInteger totalProcessed = new AtomicInteger();
   private final AtomicInteger totalFailed = new AtomicInteger();
-  private final AtomicInteger intervalProcessed = new AtomicInteger();
-  private final AtomicInteger intervalFailed = new AtomicInteger();
 
   public void recordProcessed() {
     totalProcessed.incrementAndGet();
-    intervalProcessed.incrementAndGet();
   }
 
   public void recordFailed() {
     totalFailed.incrementAndGet();
-    intervalFailed.incrementAndGet();
   }
 
-  public Snapshot snapshotAndResetInterval() {
-    return new Snapshot(
-        totalProcessed.get(),
-        totalFailed.get(),
-        intervalProcessed.getAndSet(0),
-        intervalFailed.getAndSet(0));
+  public Snapshot snapshot() {
+    return new Snapshot(totalProcessed.get(), totalFailed.get());
   }
 
   public static class Snapshot {
     private final int totalProcessed;
     private final int totalFailed;
-    private final int intervalProcessed;
-    private final int intervalFailed;
 
-    public Snapshot(
-        int totalProcessed, int totalFailed, int intervalProcessed, int intervalFailed) {
+    public Snapshot(int totalProcessed, int totalFailed) {
       this.totalProcessed = totalProcessed;
       this.totalFailed = totalFailed;
-      this.intervalProcessed = intervalProcessed;
-      this.intervalFailed = intervalFailed;
     }
 
     public int getTotalProcessed() {
@@ -50,14 +38,6 @@ public class HeartbeatTaskCounters {
 
     public int getTotalFailed() {
       return totalFailed;
-    }
-
-    public int getIntervalProcessed() {
-      return intervalProcessed;
-    }
-
-    public int getIntervalFailed() {
-      return intervalFailed;
     }
   }
 }

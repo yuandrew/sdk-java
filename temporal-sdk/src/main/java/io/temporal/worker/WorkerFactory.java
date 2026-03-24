@@ -265,13 +265,9 @@ public final class WorkerFactory {
                     .build());
 
     // Disable heartbeat manager if the server doesn't support worker heartbeats
-    WorkflowClientInternal clientInternal =
-        (WorkflowClientInternal) workflowClient.getInternal();
+    WorkflowClientInternal clientInternal = (WorkflowClientInternal) workflowClient.getInternal();
     if (clientInternal.getHeartbeatManager() != null
-        && !describeResponse
-            .getNamespaceInfo()
-            .getCapabilities()
-            .getWorkerHeartbeats()) {
+        && !describeResponse.getNamespaceInfo().getCapabilities().getWorkerHeartbeats()) {
       log.debug(
           "Server does not support worker heartbeats for namespace {}, heartbeating disabled",
           workflowClient.getOptions().getNamespace());

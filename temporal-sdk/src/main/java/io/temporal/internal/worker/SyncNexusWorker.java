@@ -97,6 +97,18 @@ public class SyncNexusWorker implements SuspendableWorker {
     return worker.getSlotSupplier();
   }
 
+  public HeartbeatTaskCounters getHeartbeatTaskCounters() {
+    return worker.getHeartbeatTaskCounters();
+  }
+
+  public PollerOptions getPollerOptions() {
+    return worker.getPollerOptions();
+  }
+
+  public PollerTracker getPollerTracker() {
+    return worker.getPollerTracker();
+  }
+
   @Override
   public WorkerLifecycleState getLifecycleState() {
     return worker.getLifecycleState();

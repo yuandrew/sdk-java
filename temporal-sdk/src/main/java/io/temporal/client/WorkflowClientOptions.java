@@ -171,6 +171,11 @@ public final class WorkflowClientOptions {
     }
 
     public WorkflowClientOptions build() {
+      Duration resolvedInterval = workerHeartbeatInterval;
+      if (resolvedInterval == null
+          || (resolvedInterval.getSeconds() == 0 && resolvedInterval.getNano() == 0)) {
+        resolvedInterval = Duration.ofSeconds(60);
+      }
       return new WorkflowClientOptions(
           namespace,
           dataConverter,
@@ -180,7 +185,7 @@ public final class WorkflowClientOptions {
           contextPropagators,
           queryRejectCondition,
           plugins == null ? EMPTY_PLUGINS : plugins,
-          workerHeartbeatInterval);
+          resolvedInterval);
     }
 
     /**

@@ -31,6 +31,7 @@ final class ActivityPollTask implements MultiThreadedPoller.PollTask<ActivityTas
   private final Scope metricsScope;
   private final PollActivityTaskQueueRequest pollRequest;
   private final AtomicInteger pollGauge = new AtomicInteger();
+  private final PollerTracker pollerTracker;
 
   @SuppressWarnings("deprecation")
   public ActivityPollTask(
@@ -42,10 +43,12 @@ final class ActivityPollTask implements MultiThreadedPoller.PollTask<ActivityTas
       double activitiesPerSecond,
       @Nonnull TrackingSlotSupplier<ActivitySlotInfo> slotSupplier,
       @Nonnull Scope metricsScope,
-      @Nonnull Supplier<GetSystemInfoResponse.Capabilities> serverCapabilities) {
+      @Nonnull Supplier<GetSystemInfoResponse.Capabilities> serverCapabilities,
+      @Nonnull PollerTracker pollerTracker) {
     this.service = Objects.requireNonNull(service);
     this.slotSupplier = slotSupplier;
     this.metricsScope = Objects.requireNonNull(metricsScope);
+    this.pollerTracker = Objects.requireNonNull(pollerTracker);
 
     PollActivityTaskQueueRequest.Builder pollRequest =
         PollActivityTaskQueueRequest.newBuilder()
@@ -101,6 +104,7 @@ final class ActivityPollTask implements MultiThreadedPoller.PollTask<ActivityTas
     MetricsTag.tagged(metricsScope, PollerTypeMetricsTag.PollerType.ACTIVITY_TASK)
         .gauge(MetricsType.NUM_POLLERS)
         .update(pollGauge.incrementAndGet());
+    pollerTracker.pollStarted();
 
     try {
       response =
@@ -119,6 +123,7 @@ final class ActivityPollTask implements MultiThreadedPoller.PollTask<ActivityTas
               ProtobufTimeUtils.toM3Duration(
                   response.getStartedTime(), response.getCurrentAttemptScheduledTime()));
       isSuccessful = true;
+      pollerTracker.pollSucceeded();
       return new ActivityTask(
           response,
           permit,
@@ -127,6 +132,7 @@ final class ActivityPollTask implements MultiThreadedPoller.PollTask<ActivityTas
       MetricsTag.tagged(metricsScope, PollerTypeMetricsTag.PollerType.ACTIVITY_TASK)
           .gauge(MetricsType.NUM_POLLERS)
           .update(pollGauge.decrementAndGet());
+      pollerTracker.pollCompleted();
 
       if (!isSuccessful) slotSupplier.releaseSlot(SlotReleaseReason.neverUsed(), permit);
     }

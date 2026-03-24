@@ -16,33 +16,52 @@ public class HeartbeatTaskCountersTest {
     counters.recordProcessed();
     counters.recordFailed();
 
-    HeartbeatTaskCounters.Snapshot snap = counters.snapshotAndResetInterval();
+    HeartbeatTaskCounters.Snapshot snap = counters.snapshot();
     assertEquals(2, snap.getTotalProcessed());
     assertEquals(1, snap.getTotalFailed());
-    assertEquals(2, snap.getIntervalProcessed());
-    assertEquals(1, snap.getIntervalFailed());
   }
 
   @Test
-  public void testIntervalReset() {
+  public void testCumulativeTotalsNeverReset() {
     HeartbeatTaskCounters counters = new HeartbeatTaskCounters();
     counters.recordProcessed();
     counters.recordProcessed();
     counters.recordFailed();
 
-    // First snapshot captures interval
-    counters.snapshotAndResetInterval();
+    HeartbeatTaskCounters.Snapshot snap1 = counters.snapshot();
+    assertEquals(2, snap1.getTotalProcessed());
+    assertEquals(1, snap1.getTotalFailed());
 
-    // Record more
+    // Record more after snapshot
     counters.recordProcessed();
+    counters.recordFailed();
 
-    HeartbeatTaskCounters.Snapshot snap = counters.snapshotAndResetInterval();
-    // Totals accumulate
-    assertEquals(3, snap.getTotalProcessed());
-    assertEquals(1, snap.getTotalFailed());
-    // Interval only has new counts
-    assertEquals(1, snap.getIntervalProcessed());
-    assertEquals(0, snap.getIntervalFailed());
+    HeartbeatTaskCounters.Snapshot snap2 = counters.snapshot();
+    assertEquals(3, snap2.getTotalProcessed());
+    assertEquals(2, snap2.getTotalFailed());
+  }
+
+  @Test
+  public void testDeltaComputedExternally() {
+    HeartbeatTaskCounters counters = new HeartbeatTaskCounters();
+    counters.recordProcessed();
+    counters.recordProcessed();
+    counters.recordFailed();
+
+    HeartbeatTaskCounters.Snapshot prev = counters.snapshot();
+
+    counters.recordProcessed();
+    counters.recordProcessed();
+    counters.recordProcessed();
+    counters.recordFailed();
+
+    HeartbeatTaskCounters.Snapshot curr = counters.snapshot();
+
+    // Delta = current - previous
+    int deltaProcessed = curr.getTotalProcessed() - prev.getTotalProcessed();
+    int deltaFailed = curr.getTotalFailed() - prev.getTotalFailed();
+    assertEquals(3, deltaProcessed);
+    assertEquals(1, deltaFailed);
   }
 
   @Test
@@ -71,7 +90,7 @@ public class HeartbeatTaskCountersTest {
     }
     executor.shutdown();
 
-    HeartbeatTaskCounters.Snapshot snap = counters.snapshotAndResetInterval();
+    HeartbeatTaskCounters.Snapshot snap = counters.snapshot();
     assertEquals(threadCount * opsPerThread, snap.getTotalProcessed());
     assertEquals(threadCount * (opsPerThread / 10), snap.getTotalFailed());
   }

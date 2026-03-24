@@ -48,6 +48,8 @@ final class NexusWorker implements SuspendableWorker {
   private final GrpcRetryer grpcRetryer;
   private final GrpcRetryer.GrpcRetryerOptions replyGrpcRetryerOptions;
   private final TrackingSlotSupplier<NexusSlotInfo> slotSupplier;
+  private final HeartbeatTaskCounters heartbeatTaskCounters = new HeartbeatTaskCounters();
+  private final PollerTracker pollerTracker = new PollerTracker();
 
   public NexusWorker(
       @Nonnull WorkflowServiceStubs service,
@@ -99,7 +101,8 @@ final class NexusWorker implements SuspendableWorker {
                     options.getWorkerVersioningOptions(),
                     workerMetricsScope,
                     service.getServerCapabilities(),
-                    this.slotSupplier),
+                    this.slotSupplier,
+                    pollerTracker),
                 this.pollTaskExecutor,
                 pollerOptions,
                 workerMetricsScope);
@@ -115,7 +118,8 @@ final class NexusWorker implements SuspendableWorker {
                     options.getWorkerVersioningOptions(),
                     this.slotSupplier,
                     workerMetricsScope,
-                    service.getServerCapabilities()),
+                    service.getServerCapabilities(),
+                    pollerTracker),
                 this.pollTaskExecutor,
                 pollerOptions,
                 workerMetricsScope);
@@ -203,6 +207,18 @@ final class NexusWorker implements SuspendableWorker {
     return slotSupplier;
   }
 
+  public HeartbeatTaskCounters getHeartbeatTaskCounters() {
+    return heartbeatTaskCounters;
+  }
+
+  public PollerOptions getPollerOptions() {
+    return pollerOptions;
+  }
+
+  public PollerTracker getPollerTracker() {
+    return pollerTracker;
+  }
+
   @Override
   public String toString() {
     return String.format(
@@ -262,6 +278,10 @@ final class NexusWorker implements SuspendableWorker {
 
       try {
         handleNexusTask(task, metricsScope);
+        heartbeatTaskCounters.recordProcessed();
+      } catch (RuntimeException e) {
+        heartbeatTaskCounters.recordFailed();
+        throw e;
       } finally {
         task.getCompletionCallback().apply();
         MDC.remove(LoggerTag.NEXUS_SERVICE);

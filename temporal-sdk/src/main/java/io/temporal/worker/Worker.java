@@ -6,8 +6,10 @@ import com.google.common.base.Strings;
 import com.uber.m3.tally.Scope;
 import com.uber.m3.util.ImmutableMap;
 import io.temporal.api.enums.v1.WorkerStatus;
+import io.temporal.api.worker.v1.PluginInfo;
 import io.temporal.api.worker.v1.WorkerHeartbeat;
 import io.temporal.api.worker.v1.WorkerHostInfo;
+import io.temporal.api.worker.v1.WorkerPollerInfo;
 import io.temporal.api.worker.v1.WorkerSlotsInfo;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
@@ -60,6 +62,8 @@ public final class Worker {
   private final Instant startTime = Instant.now();
   private final WorkflowClientOptions clientOptions;
   private final @Nonnull WorkflowExecutorCache cache;
+  private final java.util.concurrent.ConcurrentHashMap<String, HeartbeatTaskCounters.Snapshot>
+      previousSnapshots = new java.util.concurrent.ConcurrentHashMap<>();
 
   /**
    * Creates worker that connects to an instance of the Temporal Service.
@@ -468,60 +472,150 @@ public final class Worker {
   }
 
   Supplier<WorkerHeartbeat> buildHeartbeatCallback(String workerGroupingKey) {
+    // The callback can be invoked concurrently from the heartbeat scheduler and the shutdown path
+    final Object callbackLock = new Object();
     return () -> {
-      WorkerHeartbeat.Builder hb =
-          WorkerHeartbeat.newBuilder()
-              .setWorkerInstanceKey(workerInstanceKey)
-              .setWorkerIdentity(clientOptions.getIdentity())
-              .setTaskQueue(taskQueue)
-              .setSdkName(Version.SDK_NAME)
-              .setSdkVersion(Version.LIBRARY_VERSION)
-              .setStatus(WorkerStatus.WORKER_STATUS_RUNNING)
-              .setStartTime(toProtoTimestamp(startTime))
-              .setHeartbeatTime(toProtoTimestamp(Instant.now()));
+      synchronized (callbackLock) {
+        WorkerHeartbeat.Builder hb =
+            WorkerHeartbeat.newBuilder()
+                .setWorkerInstanceKey(workerInstanceKey)
+                .setWorkerIdentity(clientOptions.getIdentity())
+                .setTaskQueue(taskQueue)
+                .setSdkName(Version.SDK_NAME)
+                .setSdkVersion(Version.LIBRARY_VERSION)
+                .setStatus(WorkerStatus.WORKER_STATUS_RUNNING)
+                .setStartTime(toProtoTimestamp(startTime))
+                .setHeartbeatTime(toProtoTimestamp(Instant.now()));
 
-      hb.setHostInfo(buildHostInfo(workerGroupingKey));
+        // Deployment version
+        if (options.getDeploymentOptions() != null
+            && options.getDeploymentOptions().getVersion() != null) {
+          hb.setDeploymentVersion(
+              io.temporal.api.deployment.v1.WorkerDeploymentVersion.newBuilder()
+                  .setDeploymentName(
+                      options.getDeploymentOptions().getVersion().getDeploymentName())
+                  .setBuildId(options.getDeploymentOptions().getVersion().getBuildId())
+                  .build());
+        }
 
-      hb.setWorkflowTaskSlotsInfo(buildSlotsInfo(workflowWorker.getWorkflowSlotSupplier()));
+        hb.setHostInfo(buildHostInfo(workerGroupingKey));
 
-      if (activityWorker != null) {
-        hb.setActivityTaskSlotsInfo(buildSlotsInfo(activityWorker.getSlotSupplier()));
+        // Slot info with task counters
+        hb.setWorkflowTaskSlotsInfo(
+            buildSlotsInfo(
+                "workflow",
+                workflowWorker.getWorkflowSlotSupplier(),
+                workflowWorker.getWorkflowTaskCounters()));
+
+        if (activityWorker != null) {
+          hb.setActivityTaskSlotsInfo(
+              buildSlotsInfo(
+                  "activity",
+                  activityWorker.getSlotSupplier(),
+                  activityWorker.getHeartbeatTaskCounters()));
+        }
+
+        hb.setLocalActivitySlotsInfo(
+            buildSlotsInfo(
+                "local-activity",
+                workflowWorker.getLocalActivitySlotSupplier(),
+                workflowWorker.getLocalActivityTaskCounters()));
+
+        hb.setNexusTaskSlotsInfo(
+            buildSlotsInfo(
+                "nexus", nexusWorker.getSlotSupplier(), nexusWorker.getHeartbeatTaskCounters()));
+
+        // Poller info
+        hb.setWorkflowPollerInfo(
+            buildPollerInfo(
+                workflowWorker.getWorkflowPollerOptions(),
+                workflowWorker.getWorkflowPollerTracker()));
+        if (workflowWorker.getStickyTaskQueueName() != null) {
+          hb.setWorkflowStickyPollerInfo(
+              buildPollerInfo(
+                  workflowWorker.getWorkflowPollerOptions(),
+                  workflowWorker.getStickyPollerTracker()));
+        }
+        if (activityWorker != null) {
+          hb.setActivityPollerInfo(
+              buildPollerInfo(
+                  activityWorker.getPollerOptions(), activityWorker.getPollerTracker()));
+        }
+        hb.setNexusPollerInfo(
+            buildPollerInfo(nexusWorker.getPollerOptions(), nexusWorker.getPollerTracker()));
+
+        // Sticky cache stats
+        hb.setTotalStickyCacheHit(cache.getCacheHits());
+        hb.setTotalStickyCacheMiss(cache.getCacheMisses());
+        hb.setCurrentStickyCacheSize(cache.getCurrentCacheSize());
+
+        // Plugins
+        for (WorkerPlugin plugin : plugins) {
+          hb.addPlugins(PluginInfo.newBuilder().setName(plugin.getName()).build());
+        }
+
+        return hb.build();
       }
-
-      hb.setLocalActivitySlotsInfo(buildSlotsInfo(workflowWorker.getLocalActivitySlotSupplier()));
-
-      hb.setNexusTaskSlotsInfo(buildSlotsInfo(nexusWorker.getSlotSupplier()));
-
-      // Sticky cache stats
-      hb.setTotalStickyCacheHit(cache.getCacheHits());
-      hb.setTotalStickyCacheMiss(cache.getCacheMisses());
-      hb.setCurrentStickyCacheSize(cache.getCurrentCacheSize());
-
-      return hb.build();
     };
   }
 
-  private static WorkerSlotsInfo buildSlotsInfo(TrackingSlotSupplier<?> tracker) {
+  private WorkerSlotsInfo buildSlotsInfo(
+      String key, TrackingSlotSupplier<?> tracker, HeartbeatTaskCounters counters) {
     int maxSlots = tracker.maximumSlots().orElse(-1);
     int usedSlots = tracker.getUsedSlotCount();
+    HeartbeatTaskCounters.Snapshot current = counters.snapshot();
+    HeartbeatTaskCounters.Snapshot previous = previousSnapshots.put(key, current);
+    int intervalProcessed =
+        previous != null ? current.getTotalProcessed() - previous.getTotalProcessed() : 0;
+    int intervalFailed =
+        previous != null ? current.getTotalFailed() - previous.getTotalFailed() : 0;
     return WorkerSlotsInfo.newBuilder()
-        .setCurrentAvailableSlots(maxSlots >= 0 ? maxSlots - usedSlots : 0)
+        .setCurrentAvailableSlots(maxSlots >= 0 ? maxSlots - usedSlots : -1)
         .setCurrentUsedSlots(usedSlots)
         .setSlotSupplierKind(tracker.getSupplierKind())
+        .setTotalProcessedTasks(current.getTotalProcessed())
+        .setTotalFailedTasks(current.getTotalFailed())
+        .setLastIntervalProcessedTasks(intervalProcessed)
+        .setLastIntervalFailureTasks(intervalFailed)
         .build();
   }
 
-  private static WorkerHostInfo buildHostInfo(String workerGroupingKey) {
-    String hostName;
-    try {
-      hostName = InetAddress.getLocalHost().getHostName();
-    } catch (Exception e) {
-      hostName = "unknown";
+  private static WorkerPollerInfo buildPollerInfo(
+      PollerOptions pollerOptions, PollerTracker tracker) {
+    WorkerPollerInfo.Builder builder = WorkerPollerInfo.newBuilder();
+    PollerBehavior behavior = pollerOptions.getPollerBehavior();
+    if (behavior instanceof PollerBehaviorAutoscaling) {
+      builder.setIsAutoscaling(true);
     }
+    builder.setCurrentPollers(tracker.getInFlightPolls());
+    Instant lastPoll = tracker.getLastSuccessfulPollTime();
+    if (lastPoll != null) {
+      builder.setLastSuccessfulPollTime(toProtoTimestamp(lastPoll));
+    }
+    return builder.build();
+  }
+
+  private static final JVMSystemResourceInfo systemResourceInfo = new JVMSystemResourceInfo();
+
+  private static final String CACHED_HOSTNAME;
+
+  static {
+    String h;
+    try {
+      h = InetAddress.getLocalHost().getHostName();
+    } catch (Exception e) {
+      h = "unknown";
+    }
+    CACHED_HOSTNAME = h;
+  }
+
+  private static WorkerHostInfo buildHostInfo(String workerGroupingKey) {
     return WorkerHostInfo.newBuilder()
-        .setHostName(hostName)
+        .setHostName(CACHED_HOSTNAME)
         .setWorkerGroupingKey(workerGroupingKey)
         .setProcessId(getProcessId())
+        .setCurrentHostCpuUsage((float) systemResourceInfo.getCPUUsagePercent())
+        .setCurrentHostMemUsage((float) systemResourceInfo.getMemoryUsagePercent())
         .build();
   }
 

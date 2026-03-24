@@ -249,6 +249,30 @@ public class SyncWorkflowWorker implements SuspendableWorker {
     return workflowWorker.hasStickyQueue();
   }
 
+  public HeartbeatTaskCounters getWorkflowTaskCounters() {
+    return workflowWorker.getHeartbeatTaskCounters();
+  }
+
+  public HeartbeatTaskCounters getLocalActivityTaskCounters() {
+    return laWorker.getHeartbeatTaskCounters();
+  }
+
+  public PollerOptions getWorkflowPollerOptions() {
+    return workflowWorker.getPollerOptions();
+  }
+
+  public PollerTracker getWorkflowPollerTracker() {
+    return workflowWorker.getPollerTracker();
+  }
+
+  public PollerTracker getStickyPollerTracker() {
+    return workflowWorker.getStickyPollerTracker();
+  }
+
+  public String getStickyTaskQueueName() {
+    return workflowWorker.getStickyTaskQueueName();
+  }
+
   public String toString() {
     return String.format(
         "SyncWorkflowWorker{namespace=%s, taskQueue=%s, identity=%s}",

@@ -18,6 +18,10 @@ import org.slf4j.LoggerFactory;
  * Manages worker heartbeat lifecycle. Created by WorkflowClientInternalImpl when
  * workerHeartbeatInterval is configured and positive.
  *
+ * <p>Capability gating happens externally: WorkerFactory checks DescribeNamespace capabilities and
+ * calls disableHeartbeatManager() on the client if the server doesn't support heartbeats, which
+ * prevents this manager from ever being used.
+ *
  * <p>The ScheduledExecutorService is started lazily when the first worker registers and stopped
  * when the last worker unregisters.
  */
@@ -59,9 +63,7 @@ public class HeartbeatManager {
     ensureSchedulerRunning();
   }
 
-  /**
-   * Unregister a worker. Stops the scheduler if no workers remain.
-   */
+  /** Unregister a worker. Stops the scheduler if no workers remain. */
   public void unregisterWorker(String workerInstanceKey) {
     callbacks.remove(workerInstanceKey);
     maybeStopScheduler();
@@ -77,7 +79,7 @@ public class HeartbeatManager {
                   t.setDaemon(true);
                   return t;
                 });
-        scheduler.scheduleAtFixedRate(
+        scheduler.scheduleWithFixedDelay(
             this::heartbeatTick, 0, interval.toMillis(), TimeUnit.MILLISECONDS);
       }
     }
@@ -123,6 +125,8 @@ public class HeartbeatManager {
         heartbeats.add(builder.build());
       }
 
+      lastHeartbeatTime = now;
+
       if (!heartbeats.isEmpty()) {
         service
             .blockingStub()
@@ -133,7 +137,13 @@ public class HeartbeatManager {
                     .addAllWorkerHeartbeat(heartbeats)
                     .build());
       }
-      lastHeartbeatTime = now;
+    } catch (io.grpc.StatusRuntimeException e) {
+      if (e.getStatus().getCode() == io.grpc.Status.Code.UNIMPLEMENTED) {
+        log.warn("Server does not support worker heartbeats, disabling heartbeat scheduler");
+        shutdown();
+        return;
+      }
+      log.debug("Failed to send worker heartbeat", e);
     } catch (Exception e) {
       log.debug("Failed to send worker heartbeat", e);
     }

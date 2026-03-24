@@ -48,6 +48,8 @@ final class ActivityWorker implements SuspendableWorker {
   private final GrpcRetryer grpcRetryer;
   private final GrpcRetryer.GrpcRetryerOptions replyGrpcRetryerOptions;
   private final TrackingSlotSupplier<ActivitySlotInfo> slotSupplier;
+  private final HeartbeatTaskCounters heartbeatTaskCounters = new HeartbeatTaskCounters();
+  private final PollerTracker pollerTracker = new PollerTracker();
 
   public ActivityWorker(
       @Nonnull WorkflowServiceStubs service,
@@ -103,7 +105,8 @@ final class ActivityWorker implements SuspendableWorker {
                     taskQueueActivitiesPerSecond,
                     this.slotSupplier,
                     workerMetricsScope,
-                    service.getServerCapabilities()),
+                    service.getServerCapabilities(),
+                    pollerTracker),
                 this.pollTaskExecutor,
                 pollerOptions,
                 workerMetricsScope);
@@ -121,7 +124,8 @@ final class ActivityWorker implements SuspendableWorker {
                     taskQueueActivitiesPerSecond,
                     this.slotSupplier,
                     workerMetricsScope,
-                    service.getServerCapabilities()),
+                    service.getServerCapabilities(),
+                    pollerTracker),
                 this.pollTaskExecutor,
                 pollerOptions,
                 workerMetricsScope);
@@ -215,6 +219,18 @@ final class ActivityWorker implements SuspendableWorker {
     return slotSupplier;
   }
 
+  public HeartbeatTaskCounters getHeartbeatTaskCounters() {
+    return heartbeatTaskCounters;
+  }
+
+  public PollerOptions getPollerOptions() {
+    return pollerOptions;
+  }
+
+  public PollerTracker getPollerTracker() {
+    return pollerTracker;
+  }
+
   @Override
   public String toString() {
     return String.format(
@@ -260,6 +276,10 @@ final class ActivityWorker implements SuspendableWorker {
       ActivityTaskHandler.Result result = null;
       try {
         result = handleActivity(task, metricsScope);
+        heartbeatTaskCounters.recordProcessed();
+      } catch (Exception e) {
+        heartbeatTaskCounters.recordFailed();
+        throw e;
       } finally {
         MDC.remove(LoggerTag.ACTIVITY_ID);
         MDC.remove(LoggerTag.ACTIVITY_TYPE);

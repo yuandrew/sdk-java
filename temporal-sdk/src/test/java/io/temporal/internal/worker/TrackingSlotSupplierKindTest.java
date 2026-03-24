@@ -24,10 +24,7 @@ public class TrackingSlotSupplierKindTest {
     SlotSupplier<ActivitySlotInfo> supplier =
         ResourceBasedSlotSupplier.createForActivity(
             controller,
-            ResourceBasedSlotOptions.newBuilder()
-                .setMinimumSlots(1)
-                .setMaximumSlots(10)
-                .build());
+            ResourceBasedSlotOptions.newBuilder().setMinimumSlots(1).setMaximumSlots(10).build());
     TrackingSlotSupplier<ActivitySlotInfo> tracking =
         new TrackingSlotSupplier<>(supplier, new NoopScope());
     assertEquals("ResourceBased", tracking.getSupplierKind());
