@@ -171,11 +171,6 @@ public final class WorkflowClientOptions {
     }
 
     public WorkflowClientOptions build() {
-      Duration resolvedInterval = workerHeartbeatInterval;
-      if (resolvedInterval == null
-          || (resolvedInterval.getSeconds() == 0 && resolvedInterval.getNano() == 0)) {
-        resolvedInterval = Duration.ofSeconds(60);
-      }
       return new WorkflowClientOptions(
           namespace,
           dataConverter,
@@ -185,7 +180,7 @@ public final class WorkflowClientOptions {
           contextPropagators,
           queryRejectCondition,
           plugins == null ? EMPTY_PLUGINS : plugins,
-          resolvedInterval);
+          resolveHeartbeatInterval(workerHeartbeatInterval));
     }
 
     /**
@@ -201,20 +196,6 @@ public final class WorkflowClientOptions {
      */
     public WorkflowClientOptions validateAndBuildWithDefaults() {
       String name = identity == null ? ManagementFactory.getRuntimeMXBean().getName() : identity;
-      Duration resolvedHeartbeatInterval = workerHeartbeatInterval;
-      if (resolvedHeartbeatInterval == null
-          || (resolvedHeartbeatInterval.getSeconds() == 0
-              && resolvedHeartbeatInterval.getNano() == 0)) {
-        resolvedHeartbeatInterval = Duration.ofSeconds(60);
-      } else if (resolvedHeartbeatInterval.isNegative()) {
-        // negative means disabled -- pass through as-is
-      } else {
-        Preconditions.checkArgument(
-            resolvedHeartbeatInterval.getSeconds() >= 1
-                && resolvedHeartbeatInterval.getSeconds() <= 60,
-            "workerHeartbeatInterval must be between 1s and 60s, got %ss",
-            resolvedHeartbeatInterval.getSeconds());
-      }
       return new WorkflowClientOptions(
           namespace == null ? DEFAULT_NAMESPACE : namespace,
           dataConverter == null ? GlobalDataConverter.get() : dataConverter,
@@ -226,7 +207,21 @@ public final class WorkflowClientOptions {
               ? QueryRejectCondition.QUERY_REJECT_CONDITION_UNSPECIFIED
               : queryRejectCondition,
           plugins == null ? EMPTY_PLUGINS : plugins,
-          resolvedHeartbeatInterval);
+          resolveHeartbeatInterval(workerHeartbeatInterval));
+    }
+
+    private static Duration resolveHeartbeatInterval(Duration raw) {
+      if (raw == null || raw.isZero()) {
+        return Duration.ofSeconds(60);
+      }
+      if (raw.isNegative()) {
+        return raw;
+      }
+      Preconditions.checkArgument(
+          raw.compareTo(Duration.ofSeconds(1)) >= 0 && raw.compareTo(Duration.ofSeconds(60)) <= 0,
+          "workerHeartbeatInterval must be between 1s and 60s, got %s",
+          raw);
+      return raw;
     }
   }
 

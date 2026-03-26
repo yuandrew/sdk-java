@@ -17,7 +17,6 @@ import io.temporal.worker.MetricsType;
 import io.temporal.worker.PollerTypeMetricsTag;
 import io.temporal.worker.tuning.*;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 import org.slf4j.Logger;
@@ -30,7 +29,6 @@ final class ActivityPollTask implements MultiThreadedPoller.PollTask<ActivityTas
   private final TrackingSlotSupplier<ActivitySlotInfo> slotSupplier;
   private final Scope metricsScope;
   private final PollActivityTaskQueueRequest pollRequest;
-  private final AtomicInteger pollGauge = new AtomicInteger();
   private final PollerTracker pollerTracker;
 
   @SuppressWarnings("deprecation")
@@ -103,8 +101,7 @@ final class ActivityPollTask implements MultiThreadedPoller.PollTask<ActivityTas
 
     MetricsTag.tagged(metricsScope, PollerTypeMetricsTag.PollerType.ACTIVITY_TASK)
         .gauge(MetricsType.NUM_POLLERS)
-        .update(pollGauge.incrementAndGet());
-    pollerTracker.pollStarted();
+        .update(pollerTracker.pollStarted());
 
     try {
       response =
@@ -131,8 +128,7 @@ final class ActivityPollTask implements MultiThreadedPoller.PollTask<ActivityTas
     } finally {
       MetricsTag.tagged(metricsScope, PollerTypeMetricsTag.PollerType.ACTIVITY_TASK)
           .gauge(MetricsType.NUM_POLLERS)
-          .update(pollGauge.decrementAndGet());
-      pollerTracker.pollCompleted();
+          .update(pollerTracker.pollCompleted());
 
       if (!isSuccessful) slotSupplier.releaseSlot(SlotReleaseReason.neverUsed(), permit);
     }

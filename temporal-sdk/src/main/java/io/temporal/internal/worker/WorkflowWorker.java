@@ -31,6 +31,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -57,8 +58,12 @@ final class WorkflowWorker implements SuspendableWorker {
   private final EagerActivityDispatcher eagerActivityDispatcher;
   private final TrackingSlotSupplier<WorkflowSlotInfo> slotSupplier;
   private volatile Supplier<io.temporal.api.worker.v1.WorkerHeartbeat> heartbeatSupplier;
+  private volatile String workerInstanceKey;
+  private volatile java.util.List<io.temporal.api.enums.v1.TaskQueueType> activeTaskQueueTypes =
+      java.util.Collections.emptyList();
 
-  private final HeartbeatTaskCounters heartbeatTaskCounters = new HeartbeatTaskCounters();
+  private final AtomicInteger totalProcessedTasks = new AtomicInteger();
+  private final AtomicInteger totalFailedTasks = new AtomicInteger();
   private final PollerTracker pollerTracker = new PollerTracker();
   private final PollerTracker stickyPollerTracker = new PollerTracker();
 
@@ -227,7 +232,12 @@ final class WorkflowWorker implements SuspendableWorker {
                   ShutdownWorkerRequest.newBuilder()
                       .setIdentity(options.getIdentity())
                       .setNamespace(namespace)
-                      .setReason(GRACEFUL_SHUTDOWN_MESSAGE);
+                      .setTaskQueue(taskQueue)
+                      .setReason(GRACEFUL_SHUTDOWN_MESSAGE)
+                      .addAllTaskQueueTypes(activeTaskQueueTypes);
+              if (workerInstanceKey != null) {
+                shutdownReq.setWorkerInstanceKey(workerInstanceKey);
+              }
               if (stickyTaskQueueName != null) {
                 shutdownReq.setStickyTaskQueue(stickyTaskQueueName);
               }
@@ -352,6 +362,15 @@ final class WorkflowWorker implements SuspendableWorker {
     this.heartbeatSupplier = supplier;
   }
 
+  public void setWorkerInstanceKey(String workerInstanceKey) {
+    this.workerInstanceKey = workerInstanceKey;
+  }
+
+  public void setActiveTaskQueueTypes(
+      java.util.List<io.temporal.api.enums.v1.TaskQueueType> types) {
+    this.activeTaskQueueTypes = types;
+  }
+
   public TrackingSlotSupplier<WorkflowSlotInfo> getSlotSupplier() {
     return slotSupplier;
   }
@@ -364,8 +383,12 @@ final class WorkflowWorker implements SuspendableWorker {
     return stickyTaskQueueName;
   }
 
-  public HeartbeatTaskCounters getHeartbeatTaskCounters() {
-    return heartbeatTaskCounters;
+  public AtomicInteger getTotalProcessedTasks() {
+    return totalProcessedTasks;
+  }
+
+  public AtomicInteger getTotalFailedTasks() {
+    return totalFailedTasks;
   }
 
   public PollerOptions getPollerOptions() {
@@ -592,9 +615,9 @@ final class WorkflowWorker implements SuspendableWorker {
         MDC.remove(LoggerTag.RUN_ID);
 
         if (taskProcessingFailed) {
-          heartbeatTaskCounters.recordFailed();
+          totalFailedTasks.incrementAndGet();
         } else {
-          heartbeatTaskCounters.recordProcessed();
+          totalProcessedTasks.incrementAndGet();
         }
 
         if (locked) {

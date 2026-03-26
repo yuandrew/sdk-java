@@ -27,6 +27,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nonnull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,7 +49,8 @@ final class NexusWorker implements SuspendableWorker {
   private final GrpcRetryer grpcRetryer;
   private final GrpcRetryer.GrpcRetryerOptions replyGrpcRetryerOptions;
   private final TrackingSlotSupplier<NexusSlotInfo> slotSupplier;
-  private final HeartbeatTaskCounters heartbeatTaskCounters = new HeartbeatTaskCounters();
+  private final AtomicInteger totalProcessedTasks = new AtomicInteger();
+  private final AtomicInteger totalFailedTasks = new AtomicInteger();
   private final PollerTracker pollerTracker = new PollerTracker();
 
   public NexusWorker(
@@ -207,8 +209,12 @@ final class NexusWorker implements SuspendableWorker {
     return slotSupplier;
   }
 
-  public HeartbeatTaskCounters getHeartbeatTaskCounters() {
-    return heartbeatTaskCounters;
+  public AtomicInteger getTotalProcessedTasks() {
+    return totalProcessedTasks;
+  }
+
+  public AtomicInteger getTotalFailedTasks() {
+    return totalFailedTasks;
   }
 
   public PollerOptions getPollerOptions() {
@@ -278,9 +284,9 @@ final class NexusWorker implements SuspendableWorker {
 
       try {
         handleNexusTask(task, metricsScope);
-        heartbeatTaskCounters.recordProcessed();
+        totalProcessedTasks.incrementAndGet();
       } catch (RuntimeException e) {
-        heartbeatTaskCounters.recordFailed();
+        totalFailedTasks.incrementAndGet();
         throw e;
       } finally {
         task.getCompletionCallback().apply();

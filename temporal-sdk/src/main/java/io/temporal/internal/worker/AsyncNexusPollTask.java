@@ -20,7 +20,6 @@ import io.temporal.worker.tuning.SlotPermit;
 import io.temporal.worker.tuning.SlotReleaseReason;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 import org.slf4j.Logger;
@@ -33,7 +32,6 @@ public class AsyncNexusPollTask implements AsyncPoller.PollTaskAsync<NexusTask> 
   private final WorkflowServiceStubs service;
   private final Scope metricsScope;
   private final PollNexusTaskQueueRequest pollRequest;
-  private final AtomicInteger pollGauge = new AtomicInteger();
   private final Context.CancellableContext grpcContext = Context.ROOT.withCancellation();
   private final PollerTracker pollerTracker;
 
@@ -82,8 +80,7 @@ public class AsyncNexusPollTask implements AsyncPoller.PollTaskAsync<NexusTask> 
 
     MetricsTag.tagged(metricsScope, PollerTypeMetricsTag.PollerType.NEXUS_TASK)
         .gauge(MetricsType.NUM_POLLERS)
-        .update(pollGauge.incrementAndGet());
-    pollerTracker.pollStarted();
+        .update(pollerTracker.pollStarted());
 
     CompletableFuture<PollNexusTaskQueueResponse> response = null;
     try {
@@ -98,8 +95,7 @@ public class AsyncNexusPollTask implements AsyncPoller.PollTaskAsync<NexusTask> 
     } catch (Exception e) {
       MetricsTag.tagged(metricsScope, PollerTypeMetricsTag.PollerType.NEXUS_TASK)
           .gauge(MetricsType.NUM_POLLERS)
-          .update(pollGauge.decrementAndGet());
-      pollerTracker.pollCompleted();
+          .update(pollerTracker.pollCompleted());
       throw new RuntimeException(e);
     }
 
@@ -126,8 +122,7 @@ public class AsyncNexusPollTask implements AsyncPoller.PollTaskAsync<NexusTask> 
             (r, e) -> {
               MetricsTag.tagged(metricsScope, PollerTypeMetricsTag.PollerType.NEXUS_TASK)
                   .gauge(MetricsType.NUM_POLLERS)
-                  .update(pollGauge.decrementAndGet());
-              pollerTracker.pollCompleted();
+                  .update(pollerTracker.pollCompleted());
             });
   }
 

@@ -54,7 +54,8 @@ final class WorkflowClientInternalImpl implements WorkflowClient, WorkflowClient
   private final Scope metricsScope;
   private final WorkflowClientInterceptor[] interceptors;
   private final WorkerFactoryRegistry workerFactoryRegistry = new WorkerFactoryRegistry();
-  private volatile @Nullable HeartbeatManager heartbeatManager;
+  private final String workerGroupingKey = java.util.UUID.randomUUID().toString();
+  private final @Nullable HeartbeatManager heartbeatManager;
 
   /**
    * Creates client that connects to an instance of the Temporal Service. Cannot be used from within
@@ -118,11 +119,7 @@ final class WorkflowClientInternalImpl implements WorkflowClient, WorkflowClient
     java.time.Duration heartbeatInterval = options.getWorkerHeartbeatInterval();
     if (!heartbeatInterval.isNegative()) {
       this.heartbeatManager =
-          new HeartbeatManager(
-              workflowServiceStubs,
-              options.getNamespace(),
-              options.getIdentity(),
-              heartbeatInterval);
+          new HeartbeatManager(workflowServiceStubs, options.getIdentity(), heartbeatInterval);
     } else {
       this.heartbeatManager = null;
     }
@@ -805,18 +802,14 @@ final class WorkflowClientInternalImpl implements WorkflowClient, WorkflowClient
   }
 
   @Override
-  @Nullable
-  public HeartbeatManager getHeartbeatManager() {
-    return heartbeatManager;
+  public String getWorkerGroupingKey() {
+    return workerGroupingKey;
   }
 
   @Override
-  public void disableHeartbeatManager() {
-    HeartbeatManager hb = this.heartbeatManager;
-    if (hb != null) {
-      hb.shutdown();
-      this.heartbeatManager = null;
-    }
+  @Nullable
+  public HeartbeatManager getHeartbeatManager() {
+    return heartbeatManager;
   }
 
   @Override

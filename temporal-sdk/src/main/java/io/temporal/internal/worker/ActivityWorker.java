@@ -26,6 +26,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nonnull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,8 +49,9 @@ final class ActivityWorker implements SuspendableWorker {
   private final GrpcRetryer grpcRetryer;
   private final GrpcRetryer.GrpcRetryerOptions replyGrpcRetryerOptions;
   private final TrackingSlotSupplier<ActivitySlotInfo> slotSupplier;
-  private final HeartbeatTaskCounters heartbeatTaskCounters = new HeartbeatTaskCounters();
-  private final PollerTracker pollerTracker = new PollerTracker();
+  private final AtomicInteger totalProcessedTasks = new AtomicInteger();
+  private final AtomicInteger totalFailedTasks = new AtomicInteger();
+  private final PollerTracker pollerTracker;
 
   public ActivityWorker(
       @Nonnull WorkflowServiceStubs service,
@@ -74,6 +76,7 @@ final class ActivityWorker implements SuspendableWorker {
             DefaultStubServiceOperationRpcRetryOptions.INSTANCE, null);
 
     this.slotSupplier = new TrackingSlotSupplier<>(slotSupplier, this.workerMetricsScope);
+    this.pollerTracker = new PollerTracker();
   }
 
   @Override
@@ -219,8 +222,12 @@ final class ActivityWorker implements SuspendableWorker {
     return slotSupplier;
   }
 
-  public HeartbeatTaskCounters getHeartbeatTaskCounters() {
-    return heartbeatTaskCounters;
+  public AtomicInteger getTotalProcessedTasks() {
+    return totalProcessedTasks;
+  }
+
+  public AtomicInteger getTotalFailedTasks() {
+    return totalFailedTasks;
   }
 
   public PollerOptions getPollerOptions() {
@@ -276,9 +283,9 @@ final class ActivityWorker implements SuspendableWorker {
       ActivityTaskHandler.Result result = null;
       try {
         result = handleActivity(task, metricsScope);
-        heartbeatTaskCounters.recordProcessed();
+        totalProcessedTasks.incrementAndGet();
       } catch (Exception e) {
-        heartbeatTaskCounters.recordFailed();
+        totalFailedTasks.incrementAndGet();
         throw e;
       } finally {
         MDC.remove(LoggerTag.ACTIVITY_ID);

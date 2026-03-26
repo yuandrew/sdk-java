@@ -151,8 +151,12 @@ public class SyncActivityWorker implements SuspendableWorker {
     return worker.getSlotSupplier();
   }
 
-  public HeartbeatTaskCounters getHeartbeatTaskCounters() {
-    return worker.getHeartbeatTaskCounters();
+  public java.util.concurrent.atomic.AtomicInteger getTotalProcessedTasks() {
+    return worker.getTotalProcessedTasks();
+  }
+
+  public java.util.concurrent.atomic.AtomicInteger getTotalFailedTasks() {
+    return worker.getTotalFailedTasks();
   }
 
   public PollerOptions getPollerOptions() {

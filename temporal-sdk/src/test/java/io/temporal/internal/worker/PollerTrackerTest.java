@@ -11,23 +11,23 @@ import org.junit.Test;
 public class PollerTrackerTest {
 
   @Test
-  public void testPollStartedIncrementsInFlight() {
+  public void testPollStartedIncrementsAndReturnsCount() {
     PollerTracker tracker = new PollerTracker();
     assertEquals(0, tracker.getInFlightPolls());
-    tracker.pollStarted();
+    assertEquals(1, tracker.pollStarted());
     assertEquals(1, tracker.getInFlightPolls());
-    tracker.pollStarted();
+    assertEquals(2, tracker.pollStarted());
     assertEquals(2, tracker.getInFlightPolls());
   }
 
   @Test
-  public void testPollCompletedDecrementsInFlight() {
+  public void testPollCompletedDecrementsAndReturnsCount() {
     PollerTracker tracker = new PollerTracker();
     tracker.pollStarted();
     tracker.pollStarted();
-    tracker.pollCompleted();
+    assertEquals(1, tracker.pollCompleted());
     assertEquals(1, tracker.getInFlightPolls());
-    tracker.pollCompleted();
+    assertEquals(0, tracker.pollCompleted());
     assertEquals(0, tracker.getInFlightPolls());
   }
 

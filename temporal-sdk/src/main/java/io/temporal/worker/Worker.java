@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
@@ -58,12 +59,13 @@ public final class Worker {
   final SyncActivityWorker activityWorker;
   final SyncNexusWorker nexusWorker;
   private final AtomicBoolean started = new AtomicBoolean();
+  private volatile boolean shuttingDown = false;
   private final String workerInstanceKey = UUID.randomUUID().toString();
   private final Instant startTime = Instant.now();
   private final WorkflowClientOptions clientOptions;
   private final @Nonnull WorkflowExecutorCache cache;
-  private final java.util.concurrent.ConcurrentHashMap<String, HeartbeatTaskCounters.Snapshot>
-      previousSnapshots = new java.util.concurrent.ConcurrentHashMap<>();
+  private final ConcurrentHashMap<String, TaskSnapshot> previousSnapshots =
+      new ConcurrentHashMap<>();
 
   /**
    * Creates worker that connects to an instance of the Temporal Service.
@@ -435,6 +437,7 @@ public final class Worker {
   }
 
   CompletableFuture<Void> shutdown(ShutdownManager shutdownManager, boolean interruptUserTasks) {
+    shuttingDown = true;
     CompletableFuture<Void> workflowWorkerShutdownFuture =
         workflowWorker.shutdown(shutdownManager, interruptUserTasks);
     CompletableFuture<Void> nexusWorkerShutdownFuture =
@@ -471,11 +474,27 @@ public final class Worker {
     return workerInstanceKey;
   }
 
+  java.util.List<io.temporal.api.enums.v1.TaskQueueType> getActiveTaskQueueTypes() {
+    java.util.List<io.temporal.api.enums.v1.TaskQueueType> types = new java.util.ArrayList<>();
+    if (workflowWorker != null) {
+      types.add(io.temporal.api.enums.v1.TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW);
+    }
+    if (activityWorker != null) {
+      types.add(io.temporal.api.enums.v1.TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY);
+    }
+    if (nexusWorker != null) {
+      types.add(io.temporal.api.enums.v1.TaskQueueType.TASK_QUEUE_TYPE_NEXUS);
+    }
+    return types;
+  }
+
   Supplier<WorkerHeartbeat> buildHeartbeatCallback(String workerGroupingKey) {
     // The callback can be invoked concurrently from the heartbeat scheduler and the shutdown path
     final Object callbackLock = new Object();
+    final Instant[] lastHeartbeatTime = {null};
     return () -> {
       synchronized (callbackLock) {
+        Instant now = Instant.now();
         WorkerHeartbeat.Builder hb =
             WorkerHeartbeat.newBuilder()
                 .setWorkerInstanceKey(workerInstanceKey)
@@ -483,9 +502,22 @@ public final class Worker {
                 .setTaskQueue(taskQueue)
                 .setSdkName(Version.SDK_NAME)
                 .setSdkVersion(Version.LIBRARY_VERSION)
-                .setStatus(WorkerStatus.WORKER_STATUS_RUNNING)
+                .setStatus(
+                    shuttingDown
+                        ? WorkerStatus.WORKER_STATUS_SHUTTING_DOWN
+                        : WorkerStatus.WORKER_STATUS_RUNNING)
                 .setStartTime(toProtoTimestamp(startTime))
-                .setHeartbeatTime(toProtoTimestamp(Instant.now()));
+                .setHeartbeatTime(toProtoTimestamp(now));
+
+        if (lastHeartbeatTime[0] != null) {
+          Duration elapsed = Duration.between(lastHeartbeatTime[0], now);
+          hb.setElapsedSinceLastHeartbeat(
+              com.google.protobuf.Duration.newBuilder()
+                  .setSeconds(elapsed.getSeconds())
+                  .setNanos(elapsed.getNano())
+                  .build());
+        }
+        lastHeartbeatTime[0] = now;
 
         // Deployment version
         if (options.getDeploymentOptions() != null
@@ -505,25 +537,31 @@ public final class Worker {
             buildSlotsInfo(
                 "workflow",
                 workflowWorker.getWorkflowSlotSupplier(),
-                workflowWorker.getWorkflowTaskCounters()));
+                workflowWorker.getWorkflowTotalProcessedTasks(),
+                workflowWorker.getWorkflowTotalFailedTasks()));
 
         if (activityWorker != null) {
           hb.setActivityTaskSlotsInfo(
               buildSlotsInfo(
                   "activity",
                   activityWorker.getSlotSupplier(),
-                  activityWorker.getHeartbeatTaskCounters()));
+                  activityWorker.getTotalProcessedTasks(),
+                  activityWorker.getTotalFailedTasks()));
         }
 
         hb.setLocalActivitySlotsInfo(
             buildSlotsInfo(
                 "local-activity",
                 workflowWorker.getLocalActivitySlotSupplier(),
-                workflowWorker.getLocalActivityTaskCounters()));
+                workflowWorker.getLocalActivityTotalProcessedTasks(),
+                workflowWorker.getLocalActivityTotalFailedTasks()));
 
         hb.setNexusTaskSlotsInfo(
             buildSlotsInfo(
-                "nexus", nexusWorker.getSlotSupplier(), nexusWorker.getHeartbeatTaskCounters()));
+                "nexus",
+                nexusWorker.getSlotSupplier(),
+                nexusWorker.getTotalProcessedTasks(),
+                nexusWorker.getTotalFailedTasks()));
 
         // Poller info
         hb.setWorkflowPollerInfo(
@@ -560,21 +598,26 @@ public final class Worker {
   }
 
   private WorkerSlotsInfo buildSlotsInfo(
-      String key, TrackingSlotSupplier<?> tracker, HeartbeatTaskCounters counters) {
+      String key,
+      TrackingSlotSupplier<?> tracker,
+      java.util.concurrent.atomic.AtomicInteger totalProcessed,
+      java.util.concurrent.atomic.AtomicInteger totalFailed) {
     int maxSlots = tracker.maximumSlots().orElse(-1);
     int usedSlots = tracker.getUsedSlotCount();
-    HeartbeatTaskCounters.Snapshot current = counters.snapshot();
-    HeartbeatTaskCounters.Snapshot previous = previousSnapshots.put(key, current);
-    int intervalProcessed =
-        previous != null ? current.getTotalProcessed() - previous.getTotalProcessed() : 0;
-    int intervalFailed =
-        previous != null ? current.getTotalFailed() - previous.getTotalFailed() : 0;
+    int currentProcessed = totalProcessed.get();
+    int currentFailed = totalFailed.get();
+    TaskSnapshot previous =
+        previousSnapshots.put(key, new TaskSnapshot(currentProcessed, currentFailed));
+    int intervalProcessed = previous != null ? currentProcessed - previous.processed : 0;
+    if (intervalProcessed < 0) intervalProcessed = 0;
+    int intervalFailed = previous != null ? currentFailed - previous.failed : 0;
+    if (intervalFailed < 0) intervalFailed = 0;
     return WorkerSlotsInfo.newBuilder()
-        .setCurrentAvailableSlots(maxSlots >= 0 ? maxSlots - usedSlots : -1)
+        .setCurrentAvailableSlots(maxSlots >= 0 ? Math.max(0, maxSlots - usedSlots) : -1)
         .setCurrentUsedSlots(usedSlots)
         .setSlotSupplierKind(tracker.getSupplierKind())
-        .setTotalProcessedTasks(current.getTotalProcessed())
-        .setTotalFailedTasks(current.getTotalFailed())
+        .setTotalProcessedTasks(currentProcessed)
+        .setTotalFailedTasks(currentFailed)
         .setLastIntervalProcessedTasks(intervalProcessed)
         .setLastIntervalFailureTasks(intervalFailed)
         .build();
@@ -926,6 +969,16 @@ public final class Worker {
       ((ResourceBasedSlotSupplier<?>) supplier)
           .getResourceController()
           .setMetricsScope(metricsScope);
+    }
+  }
+
+  private static final class TaskSnapshot {
+    final int processed;
+    final int failed;
+
+    TaskSnapshot(int processed, int failed) {
+      this.processed = processed;
+      this.failed = failed;
     }
   }
 }

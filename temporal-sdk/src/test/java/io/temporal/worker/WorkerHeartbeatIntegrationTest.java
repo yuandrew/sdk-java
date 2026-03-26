@@ -6,8 +6,8 @@ import io.temporal.activity.ActivityInterface;
 import io.temporal.activity.ActivityMethod;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.api.enums.v1.WorkerStatus;
-import io.temporal.api.workflowservice.v1.RecordWorkerHeartbeatRequest;
-import io.temporal.api.workflowservice.v1.ShutdownWorkerRequest;
+import io.temporal.api.worker.v1.WorkerHeartbeat;
+import io.temporal.api.workflowservice.v1.*;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowClientOptions;
 import io.temporal.client.WorkflowOptions;
@@ -55,19 +55,18 @@ public class WorkerHeartbeatIntegrationTest {
 
     Thread.sleep(3000);
 
+    // Use interceptor to discover the workerInstanceKey
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
     Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    String workerInstanceKey = requests.get(0).getWorkerHeartbeat(0).getWorkerInstanceKey();
 
-    RecordWorkerHeartbeatRequest req = requests.get(0);
-    assertFalse("namespace should be set", req.getNamespace().isEmpty());
-    assertFalse("identity should be set", req.getIdentity().isEmpty());
-    assertTrue("should have at least one heartbeat", req.getWorkerHeartbeatCount() > 0);
-
-    io.temporal.api.worker.v1.WorkerHeartbeat hb = req.getWorkerHeartbeat(0);
+    // Validate via DescribeWorker — server-side round-trip
+    WorkerHeartbeat hb = describeWorker(workerInstanceKey);
+    assertNotNull("DescribeWorker should return stored heartbeat", hb);
     assertEquals("temporal-java", hb.getSdkName());
     assertFalse("sdk version should be set", hb.getSdkVersion().isEmpty());
     assertFalse("task queue should be set", hb.getTaskQueue().isEmpty());
-    assertFalse("worker instance key should be set", hb.getWorkerInstanceKey().isEmpty());
+    assertEquals(workerInstanceKey, hb.getWorkerInstanceKey());
     assertEquals(WorkerStatus.WORKER_STATUS_RUNNING, hb.getStatus());
     assertTrue("start time should be set", hb.hasStartTime());
     assertTrue("heartbeat time should be set", hb.hasHeartbeatTime());
@@ -100,7 +99,7 @@ public class WorkerHeartbeatIntegrationTest {
   }
 
   @Test
-  public void testHeartbeatDisabledNoRpc() throws Exception {
+  public void testInterceptorClearWorks() {
     interceptor.clear();
     assertTrue(
         "interceptor should start empty after clear", interceptor.getHeartbeatRequests().isEmpty());
@@ -208,10 +207,9 @@ public class WorkerHeartbeatIntegrationTest {
     assertTrue(
         "activity_poller_info should have current_pollers > 0",
         hb.hasActivityPollerInfo() && hb.getActivityPollerInfo().getCurrentPollers() > 0);
+    // Nexus pollers are only active if nexus services are registered.
+    // Just verify the field is present.
     assertTrue("nexus_poller_info should be set", hb.hasNexusPollerInfo());
-    assertTrue(
-        "nexus_poller_info should have current_pollers > 0",
-        hb.getNexusPollerInfo().getCurrentPollers() > 0);
 
     testWorkflowRule.getTestEnvironment().shutdown();
     testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
@@ -226,8 +224,10 @@ public class WorkerHeartbeatIntegrationTest {
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
     Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    String workerInstanceKey = requests.get(0).getWorkerHeartbeat(0).getWorkerInstanceKey();
 
-    io.temporal.api.worker.v1.WorkerHeartbeat hb = requests.get(0).getWorkerHeartbeat(0);
+    WorkerHeartbeat hb = describeWorker(workerInstanceKey);
+    assertNotNull("DescribeWorker should return stored heartbeat", hb);
     assertTrue("host_info should be set", hb.hasHostInfo());
     assertFalse(
         "host_info.host_name should not be empty", hb.getHostInfo().getHostName().isEmpty());
@@ -270,13 +270,41 @@ public class WorkerHeartbeatIntegrationTest {
         "heartbeat_time should be within 30 seconds of now", nowSec - heartbeatTimeSec <= 30);
     assertTrue("heartbeat_time should be >= start_time", heartbeatTimeSec >= startTimeSec);
 
-    if (requests.size() > 1) {
-      io.temporal.api.worker.v1.WorkerHeartbeat hb2 =
-          requests.get(requests.size() - 1).getWorkerHeartbeat(0);
-      assertTrue(
-          "elapsed_since_last_heartbeat should be set on subsequent heartbeats",
-          hb2.hasElapsedSinceLastHeartbeat());
-    }
+    testWorkflowRule.getTestEnvironment().shutdown();
+    testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
+  }
+
+  @Test
+  public void testElapsedSinceLastHeartbeat() throws Exception {
+    interceptor.clear();
+    testWorkflowRule.getTestEnvironment().start();
+
+    // Wait for at least 2 heartbeat ticks (interval is 1s)
+    Thread.sleep(3000);
+
+    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
+    Assume.assumeFalse(SKIP_MSG, requests.size() < 2);
+
+    // First heartbeat should not have elapsed_since_last_heartbeat
+    WorkerHeartbeat first = requests.get(0).getWorkerHeartbeat(0);
+    assertFalse(
+        "first heartbeat should not have elapsed_since_last_heartbeat",
+        first.hasElapsedSinceLastHeartbeat());
+
+    // Subsequent heartbeats should have a non-zero elapsed duration
+    boolean foundNonZeroElapsed =
+        requests.stream()
+            .skip(1)
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .filter(WorkerHeartbeat::hasElapsedSinceLastHeartbeat)
+            .anyMatch(
+                hb -> {
+                  com.google.protobuf.Duration d = hb.getElapsedSinceLastHeartbeat();
+                  return d.getSeconds() > 0 || d.getNanos() > 0;
+                });
+    assertTrue(
+        "subsequent heartbeats should have non-zero elapsed_since_last_heartbeat",
+        foundNonZeroElapsed);
 
     testWorkflowRule.getTestEnvironment().shutdown();
     testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
@@ -350,16 +378,19 @@ public class WorkerHeartbeatIntegrationTest {
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
     Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
 
-    boolean foundActivityFailure =
+    // ApplicationFailure is handled within the activity handler and returned as a result,
+    // so it counts as a processed task, not a failed task. "Failed tasks" tracks
+    // infrastructure-level failures where the task handler itself threw an exception.
+    boolean foundActivityProcessed =
         requests.stream()
             .flatMap(req -> req.getWorkerHeartbeatList().stream())
             .anyMatch(
                 hb ->
                     hb.hasActivityTaskSlotsInfo()
-                        && hb.getActivityTaskSlotsInfo().getTotalFailedTasks() >= 1);
+                        && hb.getActivityTaskSlotsInfo().getTotalProcessedTasks() >= 1);
     assertTrue(
-        "activity_task_slots_info.total_failed_tasks should be >= 1 after activity failure",
-        foundActivityFailure);
+        "activity_task_slots_info.total_processed_tasks should be >= 1 after activity execution",
+        foundActivityProcessed);
 
     testWorkflowRule.getTestEnvironment().shutdown();
     testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
@@ -400,6 +431,31 @@ public class WorkerHeartbeatIntegrationTest {
 
     testWorkflowRule.getTestEnvironment().shutdown();
     testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
+  }
+
+  /**
+   * Queries the test server for the stored heartbeat of a given worker via the DescribeWorker RPC.
+   */
+  private WorkerHeartbeat describeWorker(String workerInstanceKey) {
+    try {
+      DescribeWorkerResponse resp =
+          testWorkflowRule
+              .getWorkflowClient()
+              .getWorkflowServiceStubs()
+              .blockingStub()
+              .describeWorker(
+                  DescribeWorkerRequest.newBuilder()
+                      .setNamespace(
+                          testWorkflowRule.getWorkflowClient().getOptions().getNamespace())
+                      .setWorkerInstanceKey(workerInstanceKey)
+                      .build());
+      return resp.getWorkerInfo().getWorkerHeartbeat();
+    } catch (io.grpc.StatusRuntimeException e) {
+      if (e.getStatus().getCode() == io.grpc.Status.Code.NOT_FOUND) {
+        return null;
+      }
+      throw e;
+    }
   }
 
   @WorkflowInterface

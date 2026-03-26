@@ -21,8 +21,8 @@ public interface WorkflowClientInternal {
 
   NexusStartWorkflowResponse startNexus(NexusStartWorkflowRequest request, Functions.Proc workflow);
 
+  String getWorkerGroupingKey();
+
   @Nullable
   HeartbeatManager getHeartbeatManager();
-
-  void disableHeartbeatManager();
 }

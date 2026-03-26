@@ -245,16 +245,33 @@ public class SyncWorkflowWorker implements SuspendableWorker {
     workflowWorker.setHeartbeatSupplier(supplier);
   }
 
+  public void setWorkerInstanceKey(String workerInstanceKey) {
+    workflowWorker.setWorkerInstanceKey(workerInstanceKey);
+  }
+
+  public void setActiveTaskQueueTypes(
+      java.util.List<io.temporal.api.enums.v1.TaskQueueType> types) {
+    workflowWorker.setActiveTaskQueueTypes(types);
+  }
+
   public boolean hasStickyQueue() {
     return workflowWorker.hasStickyQueue();
   }
 
-  public HeartbeatTaskCounters getWorkflowTaskCounters() {
-    return workflowWorker.getHeartbeatTaskCounters();
+  public java.util.concurrent.atomic.AtomicInteger getWorkflowTotalProcessedTasks() {
+    return workflowWorker.getTotalProcessedTasks();
   }
 
-  public HeartbeatTaskCounters getLocalActivityTaskCounters() {
-    return laWorker.getHeartbeatTaskCounters();
+  public java.util.concurrent.atomic.AtomicInteger getWorkflowTotalFailedTasks() {
+    return workflowWorker.getTotalFailedTasks();
+  }
+
+  public java.util.concurrent.atomic.AtomicInteger getLocalActivityTotalProcessedTasks() {
+    return laWorker.getTotalProcessedTasks();
+  }
+
+  public java.util.concurrent.atomic.AtomicInteger getLocalActivityTotalFailedTasks() {
+    return laWorker.getTotalFailedTasks();
   }
 
   public PollerOptions getWorkflowPollerOptions() {

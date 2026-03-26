@@ -20,7 +20,6 @@ import io.temporal.worker.tuning.WorkflowSlotInfo;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -35,7 +34,6 @@ public class AsyncWorkflowPollTask
   private final Scope metricsScope;
   private final Scope pollerMetricScope;
   private final PollWorkflowTaskQueueRequest pollRequest;
-  private final AtomicInteger pollGauge = new AtomicInteger();
   private final MetricsTag.TagValue taskQueueTagValue;
   private final boolean stickyPoller;
   private final Context.CancellableContext grpcContext = Context.ROOT.withCancellation();
@@ -125,8 +123,7 @@ public class AsyncWorkflowPollTask
 
     MetricsTag.tagged(metricsScope, taskQueueTagValue)
         .gauge(MetricsType.NUM_POLLERS)
-        .update(pollGauge.incrementAndGet());
-    pollerTracker.pollStarted();
+        .update(pollerTracker.pollStarted());
 
     CompletableFuture<PollWorkflowTaskQueueResponse> response = null;
     try {
@@ -141,8 +138,7 @@ public class AsyncWorkflowPollTask
     } catch (Exception e) {
       MetricsTag.tagged(metricsScope, taskQueueTagValue)
           .gauge(MetricsType.NUM_POLLERS)
-          .update(pollGauge.decrementAndGet());
-      pollerTracker.pollCompleted();
+          .update(pollerTracker.pollCompleted());
       throw new RuntimeException(e);
     }
 
@@ -168,8 +164,7 @@ public class AsyncWorkflowPollTask
             (r, e) -> {
               MetricsTag.tagged(metricsScope, taskQueueTagValue)
                   .gauge(MetricsType.NUM_POLLERS)
-                  .update(pollGauge.decrementAndGet());
-              pollerTracker.pollCompleted();
+                  .update(pollerTracker.pollCompleted());
             });
   }
 
