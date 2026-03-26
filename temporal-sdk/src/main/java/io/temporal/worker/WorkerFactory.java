@@ -306,21 +306,17 @@ public final class WorkerFactory {
     }
 
     // Register heartbeat callbacks after workers are started.
-    // Always set the heartbeat supplier on the workflow worker so the shutdown RPC
-    // includes heartbeat data, even when periodic heartbeating is disabled.
     WorkflowClientInternal clientInternal = (WorkflowClientInternal) workflowClient.getInternal();
     HeartbeatManager hbManager = clientInternal.getHeartbeatManager();
-    String namespace = workflowClient.getOptions().getNamespace();
-    String workerGroupingKey = clientInternal.getWorkerGroupingKey();
-    for (Worker worker : workers.values()) {
-      Supplier<WorkerHeartbeat> heartbeatSupplier =
-          worker.buildHeartbeatCallback(workerGroupingKey);
-      if (hbManager != null && heartbeatsSupported) {
+    if (hbManager != null && heartbeatsSupported) {
+      String namespace = workflowClient.getOptions().getNamespace();
+      String workerGroupingKey = clientInternal.getWorkerGroupingKey();
+      for (Worker worker : workers.values()) {
+        Supplier<WorkerHeartbeat> heartbeatSupplier =
+            worker.buildHeartbeatCallback(workerGroupingKey);
         hbManager.registerWorker(namespace, worker.getWorkerInstanceKey(), heartbeatSupplier);
+        worker.workflowWorker.setHeartbeatSupplier(heartbeatSupplier);
       }
-      worker.workflowWorker.setHeartbeatSupplier(heartbeatSupplier);
-      worker.workflowWorker.setWorkerInstanceKey(worker.getWorkerInstanceKey());
-      worker.workflowWorker.setActiveTaskQueueTypes(worker.getActiveTaskQueueTypes());
     }
 
     state = State.Started;
@@ -443,13 +439,14 @@ public final class WorkerFactory {
             r -> {
               // Unregister workers from heartbeat manager only after full shutdown,
               // so heartbeats continue reporting SHUTTING_DOWN until the worker is fully stopped.
-              // This matches Go and Rust SDK behavior.
-              HeartbeatManager hbManager =
-                  ((WorkflowClientInternal) workflowClient.getInternal()).getHeartbeatManager();
-              if (hbManager != null) {
-                String namespace = workflowClient.getOptions().getNamespace();
-                for (Worker worker : workers.values()) {
-                  hbManager.unregisterWorker(namespace, worker.getWorkerInstanceKey());
+              if (heartbeatsSupported) {
+                HeartbeatManager hbManager =
+                    ((WorkflowClientInternal) workflowClient.getInternal()).getHeartbeatManager();
+                if (hbManager != null) {
+                  String namespace = workflowClient.getOptions().getNamespace();
+                  for (Worker worker : workers.values()) {
+                    hbManager.unregisterWorker(namespace, worker.getWorkerInstanceKey());
+                  }
                 }
               }
               cache.invalidateAll();

@@ -477,6 +477,11 @@ final class LocalActivityWorker implements Startable, Shutdownable {
 
         reason = handleResult(activityHandlerResult, attemptTask, metricsScope);
         totalProcessedTasks.incrementAndGet();
+        if (activityHandlerResult.getTaskFailed() != null
+            && !io.temporal.internal.common.FailureUtils.isBenignApplicationFailure(
+                activityHandlerResult.getTaskFailed().getFailure())) {
+          totalFailedTasks.incrementAndGet();
+        }
       } catch (Throwable ex) {
         // handleLocalActivity is expected to never throw an exception and return a result
         // that can be used for a workflow callback if this method throws, it's a bug.

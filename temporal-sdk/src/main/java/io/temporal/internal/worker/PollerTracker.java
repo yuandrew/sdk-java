@@ -5,22 +5,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Shared mutable state for poller metrics, serving as the single source of truth for both the Tally
- * metrics gauge and heartbeat read-back.
+ * Tracks in-flight poll count and last successful poll time for heartbeat reporting.
  *
- * <p>This follows the same "capturing gauge" pattern used by Go's {@code capturingCounter} and
- * Rust's {@code gauge_with_in_mem}: a single counter that both feeds the metrics system and is
- * readable for heartbeat population. Without this, the poll task's internal gauge and the heartbeat
- * builder would need separate counters tracking the same value.
+ * <p>A single counter feeds both the metrics system and heartbeat population, avoiding the need for
+ * separate counters tracking the same value.
  *
- * <p>This object exists because poll tasks are created inside {@code start()} and passed directly
- * to pollers without the intermediate worker retaining a reference. The shared object bridges the
- * gap: the intermediate worker (e.g. ActivityWorker) creates it, passes it to the poll task, and
- * later reads it when building heartbeats.
+ * <p>This object bridges the gap between poll tasks (created inside {@code start()}) and heartbeat
+ * building: the intermediate worker (e.g. ActivityWorker) creates it, passes it to the poll task,
+ * and later reads it when building heartbeats.
  *
  * <p>{@link #pollStarted()} and {@link #pollCompleted()} return the updated count so callers can
- * forward the value to the Tally gauge in a single operation, eliminating the need for a separate
- * {@code AtomicInteger} in the poll task.
+ * forward the value to the Tally gauge in a single operation.
  */
 public class PollerTracker {
   private final AtomicInteger inFlightPolls = new AtomicInteger();

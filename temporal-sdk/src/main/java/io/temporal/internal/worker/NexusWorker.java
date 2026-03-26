@@ -283,8 +283,11 @@ final class NexusWorker implements SuspendableWorker {
           task.getPermit());
 
       try {
-        handleNexusTask(task, metricsScope);
+        boolean nexusTaskFailed = handleNexusTask(task, metricsScope);
         totalProcessedTasks.incrementAndGet();
+        if (nexusTaskFailed) {
+          totalFailedTasks.incrementAndGet();
+        }
       } catch (RuntimeException e) {
         totalFailedTasks.incrementAndGet();
         throw e;
@@ -302,16 +305,19 @@ final class NexusWorker implements SuspendableWorker {
           "Failure processing nexus response: " + response.getRequest().toString(), failure);
     }
 
-    private void handleNexusTask(NexusTask task, Scope metricsScope) {
+    /** Returns true if the nexus task completed with a failure. */
+    private boolean handleNexusTask(NexusTask task, Scope metricsScope) {
       PollNexusTaskQueueResponseOrBuilder pollResponse = task.getResponse();
       ByteString taskToken = pollResponse.getTaskToken();
 
       NexusTaskHandler.Result result;
+      boolean failed = false;
 
       Stopwatch sw = metricsScope.timer(MetricsType.NEXUS_EXEC_LATENCY).start();
       try {
         result = handler.handle(task, metricsScope);
         if (result.getHandlerError() != null) {
+          failed = true;
           metricsScope
               .tagged(
                   Collections.singletonMap(
@@ -321,6 +327,7 @@ final class NexusWorker implements SuspendableWorker {
               .inc(1);
         } else if (result.getResponse().hasStartOperation()
             && result.getResponse().getStartOperation().hasOperationError()) {
+          failed = true;
           String operationState =
               result.getResponse().getStartOperation().getOperationError().getOperationState();
           metricsScope
@@ -334,7 +341,7 @@ final class NexusWorker implements SuspendableWorker {
             .tagged(Collections.singletonMap(TASK_FAILURE_TYPE, "timeout"))
             .counter(MetricsType.NEXUS_EXEC_FAILED_COUNTER)
             .inc(1);
-        return;
+        return true;
       } catch (Throwable e) {
         metricsScope
             .tagged(Collections.singletonMap(TASK_FAILURE_TYPE, "internal_sdk_error"))
@@ -358,6 +365,7 @@ final class NexusWorker implements SuspendableWorker {
       Duration e2eDuration =
           ProtobufTimeUtils.toM3DurationSinceNow(pollResponse.getRequest().getScheduledTime());
       metricsScope.timer(MetricsType.NEXUS_TASK_E2E_LATENCY).record(e2eDuration);
+      return failed;
     }
 
     private void logExceptionDuringResultReporting(

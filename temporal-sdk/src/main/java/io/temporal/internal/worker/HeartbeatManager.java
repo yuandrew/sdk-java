@@ -2,25 +2,22 @@ package io.temporal.internal.worker;
 
 import io.temporal.api.worker.v1.WorkerHeartbeat;
 import io.temporal.api.workflowservice.v1.RecordWorkerHeartbeatRequest;
+import com.google.common.base.Preconditions;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Manages worker heartbeat lifecycle across namespaces. Created by WorkflowClientInternalImpl when
- * workerHeartbeatInterval is configured and positive.
- *
- * <p>Routes workers to per-namespace {@link SharedNamespaceWorker} instances, each with its own
- * scheduler. This matches the Go and Rust SDK architecture where heartbeats are scoped per
- * namespace.
- *
- * <p>Capability gating happens externally: WorkerFactory checks DescribeNamespace capabilities and
- * calls disableHeartbeatManager() on the client if the server doesn't support heartbeats.
+ * Manages periodic worker heartbeat RPCs. Routes workers to per-namespace {@link
+ * SharedNamespaceWorker} instances, each with its own scheduler.
  */
 public class HeartbeatManager {
   private static final Logger log = LoggerFactory.getLogger(HeartbeatManager.class);
@@ -28,10 +25,8 @@ public class HeartbeatManager {
   private final WorkflowServiceStubs service;
   private final String identity;
   private final Duration interval;
-  private final ConcurrentHashMap<String, SharedNamespaceWorker> namespaceWorkers =
-      new ConcurrentHashMap<>();
+  private final Map<String, SharedNamespaceWorker> namespaceWorkers = new HashMap<>();
 
-  private volatile boolean disabled;
   private final Object lock = new Object();
 
   public HeartbeatManager(WorkflowServiceStubs service, String identity, Duration interval) {
@@ -47,7 +42,6 @@ public class HeartbeatManager {
   public void registerWorker(
       String namespace, String workerInstanceKey, Supplier<WorkerHeartbeat> callback) {
     synchronized (lock) {
-      if (disabled) return;
       namespaceWorkers.compute(
           namespace,
           (ns, existing) -> {
@@ -67,7 +61,11 @@ public class HeartbeatManager {
   public void unregisterWorker(String namespace, String workerInstanceKey) {
     synchronized (lock) {
       SharedNamespaceWorker nsWorker = namespaceWorkers.get(namespace);
-      if (nsWorker == null) return;
+      Preconditions.checkState(
+          nsWorker != null,
+          "unregisterWorker called for unknown namespace %s, worker %s",
+          namespace,
+          workerInstanceKey);
       nsWorker.unregisterWorker(workerInstanceKey);
       if (nsWorker.isEmpty()) {
         nsWorker.shutdown();
@@ -76,18 +74,13 @@ public class HeartbeatManager {
     }
   }
 
-  public void disable() {
+  public void shutdown() {
     synchronized (lock) {
-      disabled = true;
       for (SharedNamespaceWorker nsWorker : namespaceWorkers.values()) {
         nsWorker.shutdown();
       }
       namespaceWorkers.clear();
     }
-  }
-
-  public void shutdown() {
-    disable();
   }
 
   /**
@@ -101,6 +94,7 @@ public class HeartbeatManager {
     private final ConcurrentHashMap<String, Supplier<WorkerHeartbeat>> callbacks =
         new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler;
+    private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
 
     SharedNamespaceWorker(
         WorkflowServiceStubs service, String namespace, String identity, Duration interval) {
@@ -115,7 +109,7 @@ public class HeartbeatManager {
                 return t;
               });
       scheduler.scheduleAtFixedRate(
-          this::heartbeatTick, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
+          this::heartbeatTick, 0, interval.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     void registerWorker(String workerInstanceKey, Supplier<WorkerHeartbeat> callback) {
@@ -135,6 +129,7 @@ public class HeartbeatManager {
     }
 
     void shutdown() {
+      if (!shuttingDown.compareAndSet(false, true)) return;
       scheduler.shutdown();
       try {
         scheduler.awaitTermination(5, TimeUnit.SECONDS);
@@ -166,7 +161,9 @@ public class HeartbeatManager {
         if (e.getStatus().getCode() == io.grpc.Status.Code.UNIMPLEMENTED) {
           log.warn(
               "Server does not support worker heartbeats for namespace {}, disabling", namespace);
-          shutdown();
+          // Only signal shutdown — don't awaitTermination from within the scheduler's own thread
+          shuttingDown.set(true);
+          scheduler.shutdown();
           return;
         }
         log.warn("Failed to send worker heartbeat for namespace {}", namespace, e);

@@ -13,9 +13,11 @@ import io.grpc.StatusRuntimeException;
 import io.temporal.api.common.v1.WorkflowExecution;
 import io.temporal.api.enums.v1.QueryResultType;
 import io.temporal.api.enums.v1.TaskQueueKind;
+import io.temporal.api.enums.v1.TaskQueueType;
 import io.temporal.api.enums.v1.WorkerStatus;
 import io.temporal.api.enums.v1.WorkflowTaskFailedCause;
 import io.temporal.api.failure.v1.Failure;
+import io.temporal.api.worker.v1.WorkerHeartbeat;
 import io.temporal.api.workflowservice.v1.*;
 import io.temporal.failure.ApplicationFailure;
 import io.temporal.internal.logging.LoggerTag;
@@ -57,10 +59,9 @@ final class WorkflowWorker implements SuspendableWorker {
   private final GrpcRetryer grpcRetryer;
   private final EagerActivityDispatcher eagerActivityDispatcher;
   private final TrackingSlotSupplier<WorkflowSlotInfo> slotSupplier;
-  private volatile Supplier<io.temporal.api.worker.v1.WorkerHeartbeat> heartbeatSupplier;
-  private volatile String workerInstanceKey;
-  private volatile java.util.List<io.temporal.api.enums.v1.TaskQueueType> activeTaskQueueTypes =
-      java.util.Collections.emptyList();
+  private volatile Supplier<WorkerHeartbeat> heartbeatSupplier;
+  private final String workerInstanceKey;
+  private final List<TaskQueueType> activeTaskQueueTypes;
 
   private final AtomicInteger totalProcessedTasks = new AtomicInteger();
   private final AtomicInteger totalFailedTasks = new AtomicInteger();
@@ -79,6 +80,8 @@ final class WorkflowWorker implements SuspendableWorker {
       @Nonnull WorkflowServiceStubs service,
       @Nonnull String namespace,
       @Nonnull String taskQueue,
+      @Nonnull String workerInstanceKey,
+      @Nonnull List<TaskQueueType> activeTaskQueueTypes,
       @Nullable String stickyTaskQueueName,
       @Nonnull SingleWorkerOptions options,
       @Nonnull WorkflowRunLockManager runLocks,
@@ -89,6 +92,8 @@ final class WorkflowWorker implements SuspendableWorker {
     this.service = Objects.requireNonNull(service);
     this.namespace = Objects.requireNonNull(namespace);
     this.taskQueue = Objects.requireNonNull(taskQueue);
+    this.workerInstanceKey = Objects.requireNonNull(workerInstanceKey);
+    this.activeTaskQueueTypes = Objects.requireNonNull(activeTaskQueueTypes);
     this.options = Objects.requireNonNull(options);
     this.stickyTaskQueueName = stickyTaskQueueName;
     this.pollerOptions = getPollerOptions(options);
@@ -233,11 +238,9 @@ final class WorkflowWorker implements SuspendableWorker {
                       .setIdentity(options.getIdentity())
                       .setNamespace(namespace)
                       .setTaskQueue(taskQueue)
+                      .setWorkerInstanceKey(workerInstanceKey)
                       .setReason(GRACEFUL_SHUTDOWN_MESSAGE)
                       .addAllTaskQueueTypes(activeTaskQueueTypes);
-              if (workerInstanceKey != null) {
-                shutdownReq.setWorkerInstanceKey(workerInstanceKey);
-              }
               if (stickyTaskQueueName != null) {
                 shutdownReq.setStickyTaskQueue(stickyTaskQueueName);
               }
@@ -358,18 +361,10 @@ final class WorkflowWorker implements SuspendableWorker {
         .orElse(null);
   }
 
-  public void setHeartbeatSupplier(Supplier<io.temporal.api.worker.v1.WorkerHeartbeat> supplier) {
+  public void setHeartbeatSupplier(Supplier<WorkerHeartbeat> supplier) {
     this.heartbeatSupplier = supplier;
   }
 
-  public void setWorkerInstanceKey(String workerInstanceKey) {
-    this.workerInstanceKey = workerInstanceKey;
-  }
-
-  public void setActiveTaskQueueTypes(
-      java.util.List<io.temporal.api.enums.v1.TaskQueueType> types) {
-    this.activeTaskQueueTypes = types;
-  }
 
   public TrackingSlotSupplier<WorkflowSlotInfo> getSlotSupplier() {
     return slotSupplier;
@@ -614,10 +609,9 @@ final class WorkflowWorker implements SuspendableWorker {
         MDC.remove(LoggerTag.WORKFLOW_TYPE);
         MDC.remove(LoggerTag.RUN_ID);
 
+        totalProcessedTasks.incrementAndGet();
         if (taskProcessingFailed) {
           totalFailedTasks.incrementAndGet();
-        } else {
-          totalProcessedTasks.incrementAndGet();
         }
 
         if (locked) {

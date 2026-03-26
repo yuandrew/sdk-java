@@ -5,6 +5,8 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.uber.m3.tally.Scope;
 import com.uber.m3.util.ImmutableMap;
+import io.temporal.api.deployment.v1.WorkerDeploymentVersion;
+import io.temporal.api.enums.v1.TaskQueueType;
 import io.temporal.api.enums.v1.WorkerStatus;
 import io.temporal.api.worker.v1.PluginInfo;
 import io.temporal.api.worker.v1.WorkerHeartbeat;
@@ -32,6 +34,7 @@ import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -40,6 +43,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -171,6 +176,8 @@ public final class Worker {
             client,
             namespace,
             taskQueue,
+            workerInstanceKey,
+            getActiveTaskQueueTypes(),
             singleWorkerOptions,
             localActivityOptions,
             runLocks,
@@ -474,24 +481,20 @@ public final class Worker {
     return workerInstanceKey;
   }
 
-  java.util.List<io.temporal.api.enums.v1.TaskQueueType> getActiveTaskQueueTypes() {
-    java.util.List<io.temporal.api.enums.v1.TaskQueueType> types = new java.util.ArrayList<>();
-    if (workflowWorker != null) {
-      types.add(io.temporal.api.enums.v1.TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW);
-    }
+  List<TaskQueueType> getActiveTaskQueueTypes() {
+    List<TaskQueueType> types = new ArrayList<>();
+    types.add(TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW);
     if (activityWorker != null) {
-      types.add(io.temporal.api.enums.v1.TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY);
+      types.add(TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY);
     }
-    if (nexusWorker != null) {
-      types.add(io.temporal.api.enums.v1.TaskQueueType.TASK_QUEUE_TYPE_NEXUS);
-    }
+    types.add(TaskQueueType.TASK_QUEUE_TYPE_NEXUS);
     return types;
   }
 
   Supplier<WorkerHeartbeat> buildHeartbeatCallback(String workerGroupingKey) {
     // The callback can be invoked concurrently from the heartbeat scheduler and the shutdown path
     final Object callbackLock = new Object();
-    final Instant[] lastHeartbeatTime = {null};
+    final AtomicReference<Instant> lastHeartbeatTime = new AtomicReference<>(null);
     return () -> {
       synchronized (callbackLock) {
         Instant now = Instant.now();
@@ -509,21 +512,22 @@ public final class Worker {
                 .setStartTime(toProtoTimestamp(startTime))
                 .setHeartbeatTime(toProtoTimestamp(now));
 
-        if (lastHeartbeatTime[0] != null) {
-          Duration elapsed = Duration.between(lastHeartbeatTime[0], now);
+        Instant previousHeartbeat = lastHeartbeatTime.get();
+        if (previousHeartbeat != null) {
+          Duration elapsed = Duration.between(previousHeartbeat, now);
           hb.setElapsedSinceLastHeartbeat(
               com.google.protobuf.Duration.newBuilder()
                   .setSeconds(elapsed.getSeconds())
                   .setNanos(elapsed.getNano())
                   .build());
         }
-        lastHeartbeatTime[0] = now;
+        lastHeartbeatTime.set(now);
 
         // Deployment version
         if (options.getDeploymentOptions() != null
             && options.getDeploymentOptions().getVersion() != null) {
           hb.setDeploymentVersion(
-              io.temporal.api.deployment.v1.WorkerDeploymentVersion.newBuilder()
+              WorkerDeploymentVersion.newBuilder()
                   .setDeploymentName(
                       options.getDeploymentOptions().getVersion().getDeploymentName())
                   .setBuildId(options.getDeploymentOptions().getVersion().getBuildId())
@@ -600,8 +604,8 @@ public final class Worker {
   private WorkerSlotsInfo buildSlotsInfo(
       String key,
       TrackingSlotSupplier<?> tracker,
-      java.util.concurrent.atomic.AtomicInteger totalProcessed,
-      java.util.concurrent.atomic.AtomicInteger totalFailed) {
+      AtomicInteger totalProcessed,
+      AtomicInteger totalFailed) {
     int maxSlots = tracker.maximumSlots().orElse(-1);
     int usedSlots = tracker.getUsedSlotCount();
     int currentProcessed = totalProcessed.get();
@@ -609,9 +613,7 @@ public final class Worker {
     TaskSnapshot previous =
         previousSnapshots.put(key, new TaskSnapshot(currentProcessed, currentFailed));
     int intervalProcessed = previous != null ? currentProcessed - previous.processed : 0;
-    if (intervalProcessed < 0) intervalProcessed = 0;
     int intervalFailed = previous != null ? currentFailed - previous.failed : 0;
-    if (intervalFailed < 0) intervalFailed = 0;
     return WorkerSlotsInfo.newBuilder()
         .setCurrentAvailableSlots(maxSlots >= 0 ? Math.max(0, maxSlots - usedSlots) : -1)
         .setCurrentUsedSlots(usedSlots)
@@ -641,6 +643,7 @@ public final class Worker {
   private static final JVMSystemResourceInfo systemResourceInfo = new JVMSystemResourceInfo();
 
   private static final String CACHED_HOSTNAME;
+  private static final String CACHED_PID;
 
   static {
     String h;
@@ -650,22 +653,20 @@ public final class Worker {
       h = "unknown";
     }
     CACHED_HOSTNAME = h;
+
+    String name = ManagementFactory.getRuntimeMXBean().getName();
+    int atIndex = name.indexOf('@');
+    CACHED_PID = atIndex > 0 ? name.substring(0, atIndex) : "unknown";
   }
 
   private static WorkerHostInfo buildHostInfo(String workerGroupingKey) {
     return WorkerHostInfo.newBuilder()
         .setHostName(CACHED_HOSTNAME)
         .setWorkerGroupingKey(workerGroupingKey)
-        .setProcessId(getProcessId())
+        .setProcessId(CACHED_PID)
         .setCurrentHostCpuUsage((float) systemResourceInfo.getCPUUsagePercent())
         .setCurrentHostMemUsage((float) systemResourceInfo.getMemoryUsagePercent())
         .build();
-  }
-
-  private static String getProcessId() {
-    String name = ManagementFactory.getRuntimeMXBean().getName();
-    int atIndex = name.indexOf('@');
-    return atIndex > 0 ? name.substring(0, atIndex) : "unknown";
   }
 
   private static com.google.protobuf.Timestamp toProtoTimestamp(Instant instant) {

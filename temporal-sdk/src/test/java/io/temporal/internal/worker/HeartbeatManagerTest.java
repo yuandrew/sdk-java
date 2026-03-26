@@ -173,18 +173,6 @@ public class HeartbeatManagerTest {
   }
 
   @Test
-  public void testDisablePreventsNewRegistrations() throws Exception {
-    manager = new HeartbeatManager(service, "test-identity", Duration.ofSeconds(1));
-    manager.disable();
-
-    WorkerHeartbeat hb = WorkerHeartbeat.newBuilder().setWorkerInstanceKey("worker-1").build();
-    manager.registerWorker("default", "worker-1", () -> hb);
-
-    Thread.sleep(2000);
-    verify(blockingStub, never()).recordWorkerHeartbeat(any());
-  }
-
-  @Test
   public void testUnregisterFromOneNamespaceDoesNotAffectAnother() throws Exception {
     manager = new HeartbeatManager(service, "test-identity", Duration.ofSeconds(1));
 

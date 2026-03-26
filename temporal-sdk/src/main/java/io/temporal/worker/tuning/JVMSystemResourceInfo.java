@@ -40,11 +40,9 @@ public class JVMSystemResourceInfo implements SystemResourceInfo {
           lastCpuUsage = 0;
         }
 
-        Runtime runtime = Runtime.getRuntime();
-        long jvmUsedMemory = runtime.totalMemory() - runtime.freeMemory();
-        long jvmMaxMemory = runtime.maxMemory();
-
-        double lastMemUsage = ((double) jvmUsedMemory / jvmMaxMemory);
+        long totalMem = osBean.getTotalPhysicalMemorySize();
+        long freeMem = osBean.getFreePhysicalMemorySize();
+        double lastMemUsage = totalMem > 0 ? ((double) (totalMem - freeMem) / totalMem) : 0;
         Instant lastRefresh = Instant.now();
         lastSystemInfo = new SystemInfo(lastRefresh, lastCpuUsage, lastMemUsage);
       }

@@ -284,6 +284,11 @@ final class ActivityWorker implements SuspendableWorker {
       try {
         result = handleActivity(task, metricsScope);
         totalProcessedTasks.incrementAndGet();
+        if (result.getTaskFailed() != null
+            && !io.temporal.internal.common.FailureUtils.isBenignApplicationFailure(
+                result.getTaskFailed().getFailure())) {
+          totalFailedTasks.incrementAndGet();
+        }
       } catch (Exception e) {
         totalFailedTasks.incrementAndGet();
         throw e;
