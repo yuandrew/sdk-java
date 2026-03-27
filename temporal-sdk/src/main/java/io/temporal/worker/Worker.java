@@ -93,7 +93,8 @@ public final class Worker {
       boolean useStickyTaskQueue,
       WorkflowThreadExecutor workflowThreadExecutor,
       List<ContextPropagator> contextPropagators,
-      @Nonnull List<WorkerPlugin> plugins) {
+      @Nonnull List<WorkerPlugin> plugins,
+      @Nonnull AtomicBoolean serverSupportsAutoscaling) {
 
     Objects.requireNonNull(client, "client should not be null");
     this.plugins = Objects.requireNonNull(plugins, "plugins should not be null");
@@ -128,7 +129,8 @@ public final class Worker {
               taskQueue,
               this.options.getMaxTaskQueueActivitiesPerSecond(),
               activityOptions,
-              activitySlotSupplier);
+              activitySlotSupplier,
+              serverSupportsAutoscaling);
     }
 
     EagerActivityDispatcher eagerActivityDispatcher =
@@ -146,7 +148,13 @@ public final class Worker {
     attachMetricsToResourceController(taggedScope, nexusSlotSupplier);
 
     nexusWorker =
-        new SyncNexusWorker(client, namespace, taskQueue, nexusOptions, nexusSlotSupplier);
+        new SyncNexusWorker(
+            client,
+            namespace,
+            taskQueue,
+            nexusOptions,
+            nexusSlotSupplier,
+            serverSupportsAutoscaling);
 
     SingleWorkerOptions singleWorkerOptions =
         toWorkflowWorkerOptions(
@@ -186,7 +194,8 @@ public final class Worker {
             workflowThreadExecutor,
             eagerActivityDispatcher,
             workflowSlotSupplier,
-            localActivitySlotSupplier);
+            localActivitySlotSupplier,
+            serverSupportsAutoscaling);
   }
 
   /**

@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import javax.annotation.Nonnull;
@@ -75,7 +76,8 @@ public class SyncWorkflowWorker implements SuspendableWorker {
       @Nonnull WorkflowThreadExecutor workflowThreadExecutor,
       @Nonnull EagerActivityDispatcher eagerActivityDispatcher,
       @Nonnull SlotSupplier<WorkflowSlotInfo> slotSupplier,
-      @Nonnull SlotSupplier<LocalActivitySlotInfo> laSlotSupplier) {
+      @Nonnull SlotSupplier<LocalActivitySlotInfo> laSlotSupplier,
+      @Nonnull AtomicBoolean serverSupportsAutoscaling) {
     this.identity = singleWorkerOptions.getIdentity();
     this.namespace = namespace;
     this.taskQueue = taskQueue;
@@ -131,7 +133,8 @@ public class SyncWorkflowWorker implements SuspendableWorker {
             cache,
             taskHandler,
             eagerActivityDispatcher,
-            slotSupplier);
+            slotSupplier,
+            serverSupportsAutoscaling);
 
     // Exists to support Worker#replayWorkflowExecution functionality.
     // This handler has to be non-sticky to avoid evicting actual executions from the cache
@@ -252,7 +255,6 @@ public class SyncWorkflowWorker implements SuspendableWorker {
   public void setHeartbeatSupplier(Supplier<WorkerHeartbeat> supplier) {
     workflowWorker.setHeartbeatSupplier(supplier);
   }
-
 
   public boolean hasStickyQueue() {
     return workflowWorker.hasStickyQueue();

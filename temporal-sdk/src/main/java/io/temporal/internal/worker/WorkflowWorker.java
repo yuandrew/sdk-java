@@ -33,6 +33,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import javax.annotation.Nonnull;
@@ -67,6 +68,7 @@ final class WorkflowWorker implements SuspendableWorker {
   private final AtomicInteger totalFailedTasks = new AtomicInteger();
   private final PollerTracker pollerTracker = new PollerTracker();
   private final PollerTracker stickyPollerTracker = new PollerTracker();
+  private final AtomicBoolean serverSupportsAutoscaling;
 
   private PollTaskExecutor<WorkflowTask> pollTaskExecutor;
 
@@ -88,7 +90,8 @@ final class WorkflowWorker implements SuspendableWorker {
       @Nonnull WorkflowExecutorCache cache,
       @Nonnull WorkflowTaskHandler handler,
       @Nonnull EagerActivityDispatcher eagerActivityDispatcher,
-      @Nonnull SlotSupplier<WorkflowSlotInfo> slotSupplier) {
+      @Nonnull SlotSupplier<WorkflowSlotInfo> slotSupplier,
+      @Nonnull AtomicBoolean serverSupportsAutoscaling) {
     this.service = Objects.requireNonNull(service);
     this.namespace = Objects.requireNonNull(namespace);
     this.taskQueue = Objects.requireNonNull(taskQueue);
@@ -105,6 +108,7 @@ final class WorkflowWorker implements SuspendableWorker {
     this.grpcRetryer = new GrpcRetryer(service.getServerCapabilities());
     this.eagerActivityDispatcher = eagerActivityDispatcher;
     this.slotSupplier = new TrackingSlotSupplier<>(slotSupplier, this.workerMetricsScope);
+    this.serverSupportsAutoscaling = serverSupportsAutoscaling;
   }
 
   @Override
@@ -174,6 +178,7 @@ final class WorkflowWorker implements SuspendableWorker {
                 pollers,
                 this.pollTaskExecutor,
                 pollerOptions,
+                serverSupportsAutoscaling.get(),
                 workerMetricsScope);
       } else {
         PollerBehaviorSimpleMaximum pollerBehavior =
@@ -364,7 +369,6 @@ final class WorkflowWorker implements SuspendableWorker {
   public void setHeartbeatSupplier(Supplier<WorkerHeartbeat> supplier) {
     this.heartbeatSupplier = supplier;
   }
-
 
   public TrackingSlotSupplier<WorkflowSlotInfo> getSlotSupplier() {
     return slotSupplier;

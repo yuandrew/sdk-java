@@ -31,6 +31,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nonnull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,6 +56,9 @@ final class NexusWorker implements SuspendableWorker {
   private final TrackingSlotSupplier<NexusSlotInfo> slotSupplier;
   private final AtomicBoolean serverSupportsAutoscaling;
   private final boolean forceOldFailureFormat;
+  private final AtomicInteger totalProcessedTasks = new AtomicInteger();
+  private final AtomicInteger totalFailedTasks = new AtomicInteger();
+  private final PollerTracker pollerTracker = new PollerTracker();
 
   public NexusWorker(
       @Nonnull WorkflowServiceStubs service,
@@ -113,7 +117,8 @@ final class NexusWorker implements SuspendableWorker {
                     options.getWorkerVersioningOptions(),
                     workerMetricsScope,
                     service.getServerCapabilities(),
-                    this.slotSupplier),
+                    this.slotSupplier,
+                    pollerTracker),
                 this.pollTaskExecutor,
                 pollerOptions,
                 serverSupportsAutoscaling.get(),
@@ -130,7 +135,8 @@ final class NexusWorker implements SuspendableWorker {
                     options.getWorkerVersioningOptions(),
                     this.slotSupplier,
                     workerMetricsScope,
-                    service.getServerCapabilities()),
+                    service.getServerCapabilities(),
+                    pollerTracker),
                 this.pollTaskExecutor,
                 pollerOptions,
                 workerMetricsScope);
@@ -212,6 +218,26 @@ final class NexusWorker implements SuspendableWorker {
               .build();
     }
     return pollerOptions;
+  }
+
+  public TrackingSlotSupplier<NexusSlotInfo> getSlotSupplier() {
+    return slotSupplier;
+  }
+
+  public AtomicInteger getTotalProcessedTasks() {
+    return totalProcessedTasks;
+  }
+
+  public AtomicInteger getTotalFailedTasks() {
+    return totalFailedTasks;
+  }
+
+  public PollerOptions getPollerOptions() {
+    return pollerOptions;
+  }
+
+  public PollerTracker getPollerTracker() {
+    return pollerTracker;
   }
 
   @Override

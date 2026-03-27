@@ -1,0 +1,11 @@
+Rust SDK heartbeat issues found during Java SDK review:
+
+1. Local activity heartbeat bug: la_execution_failed counter at metrics.rs:422 uses
+   meter.counter() instead of counter_with_in_mem(). The in-memory Arc<AtomicU64> at
+   metrics.rs:648 is never incremented, so heartbeats always report total_failed_tasks=0
+   for local activities even when failures occur.
+
+2. Activity processed/failed are mutually exclusive: activity_execution_latency (which
+   feeds total_processed_tasks) is only recorded on success (act_execution_succeeded at
+   activities.rs:356). Failed activities don't get latency recorded. This differs from Go
+   where latency is recorded unconditionally (failed is a subset of processed).

@@ -1,8 +1,8 @@
 package io.temporal.internal.worker;
 
+import com.google.common.base.Preconditions;
 import io.temporal.api.worker.v1.WorkerHeartbeat;
 import io.temporal.api.workflowservice.v1.RecordWorkerHeartbeatRequest;
-import com.google.common.base.Preconditions;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import java.time.Duration;
 import java.util.ArrayList;

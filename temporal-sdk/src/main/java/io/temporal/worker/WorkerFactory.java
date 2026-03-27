@@ -269,7 +269,6 @@ public final class WorkerFactory {
                 DescribeNamespaceRequest.newBuilder()
                     .setNamespace(workflowClient.getOptions().getNamespace())
                     .build());
-
     boolean heartbeatsSupported =
         describeNamespaceResponse.getNamespaceInfo().getCapabilities().getWorkerHeartbeats();
     if (!heartbeatsSupported) {

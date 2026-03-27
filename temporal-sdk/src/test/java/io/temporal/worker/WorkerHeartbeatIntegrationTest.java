@@ -510,8 +510,7 @@ public class WorkerHeartbeatIntegrationTest {
 
     requests = interceptor.getHeartbeatRequests();
     // Get the last heartbeat
-    WorkerHeartbeat lastHb =
-        requests.get(requests.size() - 1).getWorkerHeartbeat(0);
+    WorkerHeartbeat lastHb = requests.get(requests.size() - 1).getWorkerHeartbeat(0);
     assertEquals(
         "activity used slots should be 0 after activity completes",
         0,
@@ -604,8 +603,7 @@ public class WorkerHeartbeatIntegrationTest {
         requests.stream()
             .flatMap(req -> req.getWorkerHeartbeatList().stream())
             .anyMatch(hb -> hb.getTotalStickyCacheMiss() >= 1);
-    assertTrue(
-        "should have at least 1 sticky cache miss after cache purge", foundCacheMiss);
+    assertTrue("should have at least 1 sticky cache miss after cache purge", foundCacheMiss);
 
     testWorkflowRule.getTestEnvironment().shutdown();
     testWorkflowRule.getTestEnvironment().awaitTermination(10, TimeUnit.SECONDS);
@@ -651,8 +649,7 @@ public class WorkerHeartbeatIntegrationTest {
         "should find a heartbeat with last_interval_processed_tasks > 0", foundNonZeroInterval);
 
     // The last heartbeat (after no new work) should have interval processed = 0
-    WorkerHeartbeat lastHb =
-        requests.get(requests.size() - 1).getWorkerHeartbeat(0);
+    WorkerHeartbeat lastHb = requests.get(requests.size() - 1).getWorkerHeartbeat(0);
     if (lastHb.hasWorkflowTaskSlotsInfo()) {
       assertEquals(
           "last_interval_processed_tasks should reset to 0 when no new work occurs",
@@ -697,8 +694,7 @@ public class WorkerHeartbeatIntegrationTest {
     // Both workers should be batched in the same request (same namespace)
     RecordWorkerHeartbeatRequest lastReq = requests.get(requests.size() - 1);
     assertTrue(
-        "should have heartbeats for at least 2 workers",
-        lastReq.getWorkerHeartbeatCount() >= 2);
+        "should have heartbeats for at least 2 workers", lastReq.getWorkerHeartbeatCount() >= 2);
 
     WorkerHeartbeat hb1 =
         lastReq.getWorkerHeartbeatList().stream()
@@ -714,10 +710,8 @@ public class WorkerHeartbeatIntegrationTest {
     assertNotNull("should find heartbeat for task queue 1", hb1);
     assertNotNull("should find heartbeat for task queue 2", hb2);
 
-    assertFalse(
-        "worker 1 instance key should not be empty", hb1.getWorkerInstanceKey().isEmpty());
-    assertFalse(
-        "worker 2 instance key should not be empty", hb2.getWorkerInstanceKey().isEmpty());
+    assertFalse("worker 1 instance key should not be empty", hb1.getWorkerInstanceKey().isEmpty());
+    assertFalse("worker 2 instance key should not be empty", hb2.getWorkerInstanceKey().isEmpty());
     assertNotEquals(
         "workers should have distinct instance keys",
         hb1.getWorkerInstanceKey(),
@@ -778,8 +772,7 @@ public class WorkerHeartbeatIntegrationTest {
     WorkerHeartbeat hb =
         requests.stream()
             .flatMap(req -> req.getWorkerHeartbeatList().stream())
-            .filter(
-                h -> h.getTaskQueue().equals(testWorkflowRule.getTaskQueue() + "-resource"))
+            .filter(h -> h.getTaskQueue().equals(testWorkflowRule.getTaskQueue() + "-resource"))
             .findFirst()
             .orElse(null);
     Assume.assumeTrue("should find heartbeat for resource-based worker", hb != null);
@@ -938,9 +931,7 @@ public class WorkerHeartbeatIntegrationTest {
       BlockingActivity activity =
           Workflow.newActivityStub(
               BlockingActivity.class,
-              ActivityOptions.newBuilder()
-                  .setStartToCloseTimeout(Duration.ofSeconds(30))
-                  .build());
+              ActivityOptions.newBuilder().setStartToCloseTimeout(Duration.ofSeconds(30)).build());
       activity.block();
     }
   }
@@ -975,9 +966,7 @@ public class WorkerHeartbeatIntegrationTest {
       CacheTestActivity activity =
           Workflow.newActivityStub(
               CacheTestActivity.class,
-              ActivityOptions.newBuilder()
-                  .setStartToCloseTimeout(Duration.ofSeconds(30))
-                  .build());
+              ActivityOptions.newBuilder().setStartToCloseTimeout(Duration.ofSeconds(30)).build());
       return activity.doWork();
     }
   }

@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"rtk git stash && git merge origin/master -m \\\"Merge origin/master to pick up upstream changes\\\"\",\"timeout\":60000,\"description\":\"Stash changes and merge origin/master\"}",
+  "error": "Exit code 1\nok stashed\nAuto-merging temporal-sdk/src/main/java/io/temporal/internal/worker/ActivityWorker.java\nCONFLICT (content): Merge conflict in temporal-sdk/src/main/java/io/temporal/internal/worker/ActivityWorker.java\nAuto-merging temporal-sdk/src/main/java/io/temporal/internal/worker/AsyncWorkflowPollTask.java\nCONFLICT (content): Merge conflict in temporal-sdk/src/main/java/io/temporal/internal/worker/AsyncWorkflowPollTask.java\nAuto-merging temporal-sdk/src/main/java/io/temporal/internal/...",
+  "timestamp": "2026-03-27T00:11:53.341Z",
+  "retry_count": 2
+}

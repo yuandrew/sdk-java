@@ -1,0 +1,505 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1774559173018,
+  "projectRoot": "/Users/andrewyuan/temporal/java-deep-research",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Java/Kotlin",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "build.gradle"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "gradle",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs"
+    ],
+    "gitBranches": {
+      "defaultBranch": "master",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "build": {
+      "path": "build",
+      "purpose": "Build output",
+      "fileCount": 0,
+      "lastAccessed": 1774559173000,
+      "keyFiles": []
+    },
+    "docker": {
+      "path": "docker",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1774559173000,
+      "keyFiles": []
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 1,
+      "lastAccessed": 1774559173000,
+      "keyFiles": [
+        "AOT-native-image.md"
+      ]
+    },
+    "gradle": {
+      "path": "gradle",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1774559173000,
+      "keyFiles": [
+        "dependencyManagement.gradle",
+        "errorprone.gradle",
+        "gatherDependencies.gradle",
+        "jacoco.gradle",
+        "java.gradle"
+      ]
+    },
+    "releases": {
+      "path": "releases",
+      "purpose": null,
+      "fileCount": 65,
+      "lastAccessed": 1774559173001,
+      "keyFiles": [
+        "v0.0.1-test",
+        "v1.0.4",
+        "v1.0.5",
+        "v1.0.6",
+        "v1.0.7"
+      ]
+    },
+    "temporal-bom": {
+      "path": "temporal-bom",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1774559173001,
+      "keyFiles": [
+        "build.gradle"
+      ]
+    },
+    "temporal-envconfig": {
+      "path": "temporal-envconfig",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1774559173001,
+      "keyFiles": [
+        "build.gradle"
+      ]
+    },
+    "temporal-kotlin": {
+      "path": "temporal-kotlin",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1774559173001,
+      "keyFiles": [
+        "AGENTS.md",
+        "README.md",
+        "build.gradle"
+      ]
+    },
+    "temporal-opentracing": {
+      "path": "temporal-opentracing",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1774559173002,
+      "keyFiles": [
+        "README.md",
+        "build.gradle"
+      ]
+    },
+    "temporal-remote-data-encoder": {
+      "path": "temporal-remote-data-encoder",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1774559173002,
+      "keyFiles": [
+        "README.md",
+        "build.gradle"
+      ]
+    },
+    "temporal-sdk": {
+      "path": "temporal-sdk",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1774559173002,
+      "keyFiles": [
+        "AGENTS.md",
+        "build.gradle"
+      ]
+    },
+    "temporal-serviceclient": {
+      "path": "temporal-serviceclient",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1774559173002,
+      "keyFiles": [
+        "build.gradle"
+      ]
+    },
+    "temporal-shaded": {
+      "path": "temporal-shaded",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1774559173003,
+      "keyFiles": [
+        "README.md",
+        "build.gradle"
+      ]
+    },
+    "temporal-spring-boot-autoconfigure": {
+      "path": "temporal-spring-boot-autoconfigure",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1774559173003,
+      "keyFiles": [
+        "README.md",
+        "build.gradle"
+      ]
+    },
+    "temporal-spring-boot-starter": {
+      "path": "temporal-spring-boot-starter",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1774559173003,
+      "keyFiles": [
+        "build.gradle"
+      ]
+    },
+    "temporal-test-server": {
+      "path": "temporal-test-server",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1774559173003,
+      "keyFiles": [
+        "Dockerfile",
+        "README.md",
+        "build.gradle"
+      ]
+    },
+    "temporal-testing": {
+      "path": "temporal-testing",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1774559173003,
+      "keyFiles": [
+        "README.md",
+        "build.gradle"
+      ]
+    },
+    "temporal-workflowcheck": {
+      "path": "temporal-workflowcheck",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1774559173003,
+      "keyFiles": [
+        "README.md",
+        "build.gradle"
+      ]
+    },
+    "temporal-envconfig/src": {
+      "path": "temporal-envconfig/src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1774559173004,
+      "keyFiles": []
+    },
+    "temporal-kotlin/src": {
+      "path": "temporal-kotlin/src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1774559173004,
+      "keyFiles": []
+    },
+    "temporal-opentracing/src": {
+      "path": "temporal-opentracing/src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1774559173004,
+      "keyFiles": []
+    },
+    "temporal-remote-data-encoder/src": {
+      "path": "temporal-remote-data-encoder/src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1774559173004,
+      "keyFiles": []
+    },
+    "temporal-sdk/build": {
+      "path": "temporal-sdk/build",
+      "purpose": "Build output",
+      "fileCount": 0,
+      "lastAccessed": 1774559173004,
+      "keyFiles": []
+    },
+    "temporal-sdk/src": {
+      "path": "temporal-sdk/src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1774559173004,
+      "keyFiles": []
+    },
+    "temporal-serviceclient/build": {
+      "path": "temporal-serviceclient/build",
+      "purpose": "Build output",
+      "fileCount": 0,
+      "lastAccessed": 1774559173005,
+      "keyFiles": []
+    },
+    "temporal-serviceclient/src": {
+      "path": "temporal-serviceclient/src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1774559173005,
+      "keyFiles": []
+    },
+    "temporal-spring-boot-autoconfigure/src": {
+      "path": "temporal-spring-boot-autoconfigure/src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1774559173005,
+      "keyFiles": []
+    },
+    "temporal-test-server/build": {
+      "path": "temporal-test-server/build",
+      "purpose": "Build output",
+      "fileCount": 0,
+      "lastAccessed": 1774559173005,
+      "keyFiles": []
+    },
+    "temporal-test-server/src": {
+      "path": "temporal-test-server/src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1774559173005,
+      "keyFiles": []
+    },
+    "temporal-testing/build": {
+      "path": "temporal-testing/build",
+      "purpose": "Build output",
+      "fileCount": 0,
+      "lastAccessed": 1774559173006,
+      "keyFiles": []
+    },
+    "temporal-testing/src": {
+      "path": "temporal-testing/src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1774559173006,
+      "keyFiles": []
+    },
+    "temporal-workflowcheck/src": {
+      "path": "temporal-workflowcheck/src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1774559173006,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "temporal-sdk/src/test/java/io/temporal/worker/WorkerHeartbeatIntegrationTest.java",
+      "accessCount": 38,
+      "lastAccessed": 1774569009200,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/worker/Worker.java",
+      "accessCount": 24,
+      "lastAccessed": 1774569940821,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/worker/WorkflowWorker.java",
+      "accessCount": 23,
+      "lastAccessed": 1774570368216,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/test/java/io/temporal/internal/worker/WorkflowWorkerTest.java",
+      "accessCount": 17,
+      "lastAccessed": 1774570381298,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/worker/SyncWorkflowWorker.java",
+      "accessCount": 13,
+      "lastAccessed": 1774570357225,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/worker/WorkerFactory.java",
+      "accessCount": 13,
+      "lastAccessed": 1774570375554,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/worker/NexusWorker.java",
+      "accessCount": 12,
+      "lastAccessed": 1774570458936,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/worker/ActivityWorker.java",
+      "accessCount": 8,
+      "lastAccessed": 1774570345475,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/worker/HeartbeatManager.java",
+      "accessCount": 4,
+      "lastAccessed": 1774562129786,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 4,
+      "lastAccessed": 1774569937014,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/main/java",
+      "accessCount": 4,
+      "lastAccessed": 1774569981431,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/worker/AsyncWorkflowPollTask.java",
+      "accessCount": 4,
+      "lastAccessed": 1774570351094,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/test/java/io/temporal/internal/worker/SlotSupplierTest.java",
+      "accessCount": 4,
+      "lastAccessed": 1774570491280,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/worker",
+      "accessCount": 3,
+      "lastAccessed": 1774563102336,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal",
+      "accessCount": 3,
+      "lastAccessed": 1774564564698,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-testing/src/main/java/io/temporal/testing/internal/SDKTestWorkflowRule.java",
+      "accessCount": 2,
+      "lastAccessed": 1774559229778,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/worker",
+      "accessCount": 2,
+      "lastAccessed": 1774561305389,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/common/SimplePlugin.java",
+      "accessCount": 2,
+      "lastAccessed": 1774563172476,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/worker/WorkerFactoryOptions.java",
+      "accessCount": 1,
+      "lastAccessed": 1774559191328,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/worker/WorkflowExecutorCache.java",
+      "accessCount": 1,
+      "lastAccessed": 1774559205639,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-serviceclient/src/main/proto/temporal/api/workflowservice/v1/request_response.proto",
+      "accessCount": 1,
+      "lastAccessed": 1774559416998,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/worker/PollerTracker.java",
+      "accessCount": 1,
+      "lastAccessed": 1774561303781,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/test/java/io/temporal/internal/worker/HeartbeatManagerTest.java",
+      "accessCount": 1,
+      "lastAccessed": 1774561514155,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/worker/WorkerDeploymentOptions.java",
+      "accessCount": 1,
+      "lastAccessed": 1774563114925,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/worker/WorkerPlugin.java",
+      "accessCount": 1,
+      "lastAccessed": 1774563115352,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/common",
+      "accessCount": 1,
+      "lastAccessed": 1774563123169,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/common/WorkerDeploymentVersion.java",
+      "accessCount": 1,
+      "lastAccessed": 1774563129625,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/replay",
+      "accessCount": 1,
+      "lastAccessed": 1774563263782,
+      "type": "directory"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/replay/ReplayWorkflowTaskHandler.java",
+      "accessCount": 1,
+      "lastAccessed": 1774563267676,
+      "type": "file"
+    },
+    {
+      "path": "temporal-sdk/src/main/java/io/temporal/internal/common/PluginUtils.java",
+      "accessCount": 1,
+      "lastAccessed": 1774564568041,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

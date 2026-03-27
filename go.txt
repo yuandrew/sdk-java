@@ -1,0 +1,16 @@
+Go SDK heartbeat issues found during Java SDK review:
+
+1. RecordWorkerHeartbeatRequest does not set identity field. Both Rust and Java set it.
+   The proto defines it as "The identity of the client who initiated this request."
+   See internal_worker_heartbeat.go:168-171 — only Namespace and WorkerHeartbeat are set.
+
+2. elapsed_since_last_heartbeat is set on the first heartbeat (previousHeartbeatTime
+   initialized to time.Now() at internal_worker.go:2342). Rust and Java omit it on the
+   first heartbeat since there is no previous heartbeat to compute elapsed from. Go should
+   align with Rust — skip elapsed on the first tick.
+
+3. Heartbeat callback exception handling: if one worker's callback panics in
+   sendHeartbeats() (internal_worker_heartbeat.go:163-165), it crashes the entire
+   goroutine and no other workers in that namespace get heartbeated. Should recover
+   from panics per-callback so one misbehaving worker doesn't kill heartbeats for all
+   sibling workers.
