@@ -69,18 +69,25 @@ public class WorkerHeartbeatIntegrationTest {
           .setDoNotStart(true)
           .build();
 
+  /**
+   * Combined test for basic heartbeat fields that only require starting the environment (no
+   * workflow execution needed). Covers: RPC fields, host info, timestamps, plugins, and
+   * elapsed_since_last_heartbeat.
+   */
   @Test
-  public void testHeartbeatRpcSentWithCorrectFields() throws Exception {
+  public void testBasicHeartbeatFields() throws Exception {
     interceptor.clear();
     testWorkflowRule.getTestEnvironment().start();
 
+    // Wait for at least 2 heartbeat ticks (interval is 1s)
     Thread.sleep(3000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
     Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    Assume.assumeFalse(SKIP_MSG + " (need >= 2 heartbeats)", requests.size() < 2);
     String workerInstanceKey = requests.get(0).getWorkerHeartbeat(0).getWorkerInstanceKey();
 
-    // Validate via DescribeWorker — server-side round-trip
+    // --- RPC fields via DescribeWorker round-trip ---
     WorkerHeartbeat hb = describeWorker(workerInstanceKey);
     assertNotNull("DescribeWorker should return stored heartbeat", hb);
     assertEquals("temporal-java", hb.getSdkName());
@@ -93,213 +100,8 @@ public class WorkerHeartbeatIntegrationTest {
     assertTrue("host info should be set", hb.hasHostInfo());
     assertFalse("host name should be set", hb.getHostInfo().getHostName().isEmpty());
     assertFalse("process id should be set", hb.getHostInfo().getProcessId().isEmpty());
-  }
 
-  @Test
-  public void testSlotInfoInHeartbeat() throws Exception {
-    interceptor.clear();
-    testWorkflowRule.getTestEnvironment().start();
-
-    WorkflowClient client = testWorkflowRule.getWorkflowClient();
-    TestWorkflow wf =
-        client.newWorkflowStub(
-            TestWorkflow.class,
-            WorkflowOptions.newBuilder()
-                .setTaskQueue(testWorkflowRule.getTaskQueue())
-                .setWorkflowExecutionTimeout(Duration.ofSeconds(30))
-                .build());
-    assertEquals("done", wf.execute("test"));
-
-    Thread.sleep(2000);
-
-    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
-    String workerInstanceKey = requests.get(0).getWorkerHeartbeat(0).getWorkerInstanceKey();
-
-    WorkerHeartbeat hb = describeWorker(workerInstanceKey);
-    assertNotNull("DescribeWorker should return stored heartbeat", hb);
-
-    // All four slot types should be present
-    assertTrue("workflow_task_slots_info should be set", hb.hasWorkflowTaskSlotsInfo());
-    assertTrue("activity_task_slots_info should be set", hb.hasActivityTaskSlotsInfo());
-    assertTrue("local_activity_slots_info should be set", hb.hasLocalActivitySlotsInfo());
-    assertTrue("nexus_task_slots_info should be set", hb.hasNexusTaskSlotsInfo());
-
-    // Slot supplier kind should be set for all types
-    assertFalse(
-        "workflow slot supplier kind should be set",
-        hb.getWorkflowTaskSlotsInfo().getSlotSupplierKind().isEmpty());
-    assertFalse(
-        "activity slot supplier kind should be set",
-        hb.getActivityTaskSlotsInfo().getSlotSupplierKind().isEmpty());
-
-    // After workflow+activity completion, used slots should be 0
-    assertEquals(
-        "workflow used slots should be 0 after completion",
-        0,
-        hb.getWorkflowTaskSlotsInfo().getCurrentUsedSlots());
-    assertEquals(
-        "activity used slots should be 0 after completion",
-        0,
-        hb.getActivityTaskSlotsInfo().getCurrentUsedSlots());
-
-    // Available slots should be positive (default fixed-size supplier)
-    assertTrue(
-        "workflow available slots should be > 0",
-        hb.getWorkflowTaskSlotsInfo().getCurrentAvailableSlots() > 0);
-    assertTrue(
-        "activity available slots should be > 0",
-        hb.getActivityTaskSlotsInfo().getCurrentAvailableSlots() > 0);
-  }
-
-  @Test
-  public void testTaskCountersInHeartbeat() throws Exception {
-    interceptor.clear();
-    testWorkflowRule.getTestEnvironment().start();
-
-    WorkflowClient client = testWorkflowRule.getWorkflowClient();
-    TestWorkflow wf =
-        client.newWorkflowStub(
-            TestWorkflow.class,
-            WorkflowOptions.newBuilder()
-                .setTaskQueue(testWorkflowRule.getTaskQueue())
-                .setWorkflowExecutionTimeout(Duration.ofSeconds(30))
-                .build());
-    assertEquals("done", wf.execute("test"));
-
-    Thread.sleep(2000);
-
-    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
-
-    boolean foundWorkflowProcessed =
-        requests.stream()
-            .flatMap(req -> req.getWorkerHeartbeatList().stream())
-            .anyMatch(
-                hb ->
-                    hb.hasWorkflowTaskSlotsInfo()
-                        && hb.getWorkflowTaskSlotsInfo().getTotalProcessedTasks() >= 1);
-    assertTrue(
-        "workflow_task_slots_info.total_processed_tasks should be >= 1", foundWorkflowProcessed);
-
-    boolean foundActivityProcessed =
-        requests.stream()
-            .flatMap(req -> req.getWorkerHeartbeatList().stream())
-            .anyMatch(
-                hb ->
-                    hb.hasActivityTaskSlotsInfo()
-                        && hb.getActivityTaskSlotsInfo().getTotalProcessedTasks() >= 1);
-    assertTrue(
-        "activity_task_slots_info.total_processed_tasks should be >= 1", foundActivityProcessed);
-  }
-
-  @Test
-  public void testPollerInfoInHeartbeat() throws Exception {
-    interceptor.clear();
-    testWorkflowRule.getTestEnvironment().start();
-
-    // Run a workflow so at least one poll returns work and records a successful poll time
-    WorkflowClient client = testWorkflowRule.getWorkflowClient();
-    TestWorkflow wf =
-        client.newWorkflowStub(
-            TestWorkflow.class,
-            WorkflowOptions.newBuilder()
-                .setTaskQueue(testWorkflowRule.getTaskQueue())
-                .setWorkflowExecutionTimeout(Duration.ofSeconds(30))
-                .build());
-    assertEquals("done", wf.execute("test"));
-
-    Thread.sleep(2000);
-
-    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
-
-    // Check across all captured heartbeats since the first one may fire before any poll succeeds
-    boolean foundWorkflowPollers =
-        requests.stream()
-            .flatMap(req -> req.getWorkerHeartbeatList().stream())
-            .anyMatch(
-                hb ->
-                    hb.hasWorkflowPollerInfo()
-                        && hb.getWorkflowPollerInfo().getCurrentPollers() > 0);
-    assertTrue("workflow_poller_info should have current_pollers > 0", foundWorkflowPollers);
-
-    boolean foundActivityPollers =
-        requests.stream()
-            .flatMap(req -> req.getWorkerHeartbeatList().stream())
-            .anyMatch(
-                hb ->
-                    hb.hasActivityPollerInfo()
-                        && hb.getActivityPollerInfo().getCurrentPollers() > 0);
-    assertTrue("activity_poller_info should have current_pollers > 0", foundActivityPollers);
-
-    // Nexus pollers are only active if nexus services are registered.
-    // Just verify the field is present in any heartbeat.
-    boolean foundNexusPollerInfo =
-        requests.stream()
-            .flatMap(req -> req.getWorkerHeartbeatList().stream())
-            .anyMatch(WorkerHeartbeat::hasNexusPollerInfo);
-    assertTrue("nexus_poller_info should be set", foundNexusPollerInfo);
-
-    // After 3 seconds, at least one successful poll should have occurred
-    boolean foundWorkflowPollTime =
-        requests.stream()
-            .flatMap(req -> req.getWorkerHeartbeatList().stream())
-            .anyMatch(
-                hb ->
-                    hb.hasWorkflowPollerInfo()
-                        && hb.getWorkflowPollerInfo().hasLastSuccessfulPollTime());
-    assertTrue(
-        "workflow_poller_info should have last_successful_poll_time set", foundWorkflowPollTime);
-
-    boolean foundActivityPollTime =
-        requests.stream()
-            .flatMap(req -> req.getWorkerHeartbeatList().stream())
-            .anyMatch(
-                hb ->
-                    hb.hasActivityPollerInfo()
-                        && hb.getActivityPollerInfo().hasLastSuccessfulPollTime());
-    assertTrue(
-        "activity_poller_info should have last_successful_poll_time set", foundActivityPollTime);
-
-    // Default fixed-size pollers should not report autoscaling
-    boolean foundWorkflowAutoscaling =
-        requests.stream()
-            .flatMap(req -> req.getWorkerHeartbeatList().stream())
-            .anyMatch(
-                hb -> hb.hasWorkflowPollerInfo() && hb.getWorkflowPollerInfo().getIsAutoscaling());
-    assertFalse(
-        "workflow_poller_info.is_autoscaling should be false with default pollers",
-        foundWorkflowAutoscaling);
-
-    boolean foundActivityAutoscaling =
-        requests.stream()
-            .flatMap(req -> req.getWorkerHeartbeatList().stream())
-            .anyMatch(
-                hb -> hb.hasActivityPollerInfo() && hb.getActivityPollerInfo().getIsAutoscaling());
-    assertFalse(
-        "activity_poller_info.is_autoscaling should be false with default pollers",
-        foundActivityAutoscaling);
-  }
-
-  @Test
-  public void testHostInfoInHeartbeat() throws Exception {
-    interceptor.clear();
-    testWorkflowRule.getTestEnvironment().start();
-
-    Thread.sleep(3000);
-
-    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
-    String workerInstanceKey = requests.get(0).getWorkerHeartbeat(0).getWorkerInstanceKey();
-
-    WorkerHeartbeat hb = describeWorker(workerInstanceKey);
-    assertNotNull("DescribeWorker should return stored heartbeat", hb);
-    assertTrue("host_info should be set", hb.hasHostInfo());
-    assertFalse(
-        "host_info.host_name should not be empty", hb.getHostInfo().getHostName().isEmpty());
-    assertFalse(
-        "host_info.process_id should not be empty", hb.getHostInfo().getProcessId().isEmpty());
+    // --- Host info details ---
     assertFalse(
         "host_info.worker_grouping_key should not be empty",
         hb.getHostInfo().getWorkerGroupingKey().isEmpty());
@@ -309,42 +111,24 @@ public class WorkerHeartbeatIntegrationTest {
     assertTrue(
         "host_info.current_host_mem_usage should be >= 0",
         hb.getHostInfo().getCurrentHostMemUsage() >= 0.0f);
-  }
 
-  @Test
-  public void testTimestampsInHeartbeat() throws Exception {
-    interceptor.clear();
-    testWorkflowRule.getTestEnvironment().start();
-
-    Thread.sleep(3000);
-
-    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
-
-    io.temporal.api.worker.v1.WorkerHeartbeat hb = requests.get(0).getWorkerHeartbeat(0);
-
-    assertTrue("start_time should be set", hb.hasStartTime());
-    long startTimeSec = hb.getStartTime().getSeconds();
+    // --- Timestamps ---
+    io.temporal.api.worker.v1.WorkerHeartbeat rawHb = requests.get(0).getWorkerHeartbeat(0);
+    assertTrue("start_time should be set", rawHb.hasStartTime());
+    long startTimeSec = rawHb.getStartTime().getSeconds();
     long nowSec = java.time.Instant.now().getEpochSecond();
     assertTrue("start_time should be within 30 seconds of now", nowSec - startTimeSec <= 30);
-
-    assertTrue("heartbeat_time should be set", hb.hasHeartbeatTime());
-    long heartbeatTimeSec = hb.getHeartbeatTime().getSeconds();
+    assertTrue("heartbeat_time should be set", rawHb.hasHeartbeatTime());
+    long heartbeatTimeSec = rawHb.getHeartbeatTime().getSeconds();
     assertTrue(
         "heartbeat_time should be within 30 seconds of now", nowSec - heartbeatTimeSec <= 30);
     assertTrue("heartbeat_time should be >= start_time", heartbeatTimeSec >= startTimeSec);
-  }
 
-  @Test
-  public void testElapsedSinceLastHeartbeat() throws Exception {
-    interceptor.clear();
-    testWorkflowRule.getTestEnvironment().start();
+    // --- Plugins ---
+    assertEquals(
+        "plugins list should be empty when no plugins are configured", 0, rawHb.getPluginsCount());
 
-    // Wait for at least 2 heartbeat ticks (interval is 1s)
-    Thread.sleep(3000);
-
-    List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.size() < 2);
+    // --- Elapsed since last heartbeat ---
 
     // First heartbeat should not have elapsed_since_last_heartbeat
     WorkerHeartbeat first = requests.get(0).getWorkerHeartbeat(0);
@@ -359,8 +143,8 @@ public class WorkerHeartbeatIntegrationTest {
             .flatMap(req -> req.getWorkerHeartbeatList().stream())
             .filter(WorkerHeartbeat::hasElapsedSinceLastHeartbeat)
             .anyMatch(
-                hb -> {
-                  com.google.protobuf.Duration d = hb.getElapsedSinceLastHeartbeat();
+                h -> {
+                  com.google.protobuf.Duration d = h.getElapsedSinceLastHeartbeat();
                   return d.getSeconds() > 0 || d.getNanos() > 0;
                 });
     assertTrue(
@@ -423,19 +207,144 @@ public class WorkerHeartbeatIntegrationTest {
         shutdownReq.getTaskQueueTypesList().contains(TaskQueueType.TASK_QUEUE_TYPE_NEXUS));
   }
 
+  /**
+   * Combined test for heartbeat fields that require workflow execution. Covers: slot info, task
+   * counters, and poller info.
+   */
   @Test
-  public void testPluginsInHeartbeat() throws Exception {
+  public void testHeartbeatAfterWorkflowExecution() throws Exception {
     interceptor.clear();
     testWorkflowRule.getTestEnvironment().start();
 
-    Thread.sleep(3000);
+    WorkflowClient client = testWorkflowRule.getWorkflowClient();
+    TestWorkflow wf =
+        client.newWorkflowStub(
+            TestWorkflow.class,
+            WorkflowOptions.newBuilder()
+                .setTaskQueue(testWorkflowRule.getTaskQueue())
+                .setWorkflowExecutionTimeout(Duration.ofSeconds(30))
+                .build());
+    assertEquals("done", wf.execute("test"));
+
+    Thread.sleep(2000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
     Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    String workerInstanceKey = requests.get(0).getWorkerHeartbeat(0).getWorkerInstanceKey();
 
-    io.temporal.api.worker.v1.WorkerHeartbeat hb = requests.get(0).getWorkerHeartbeat(0);
+    // --- Slot info via DescribeWorker ---
+    WorkerHeartbeat describedHb = describeWorker(workerInstanceKey);
+    assertNotNull("DescribeWorker should return stored heartbeat", describedHb);
+
+    assertTrue("workflow_task_slots_info should be set", describedHb.hasWorkflowTaskSlotsInfo());
+    assertTrue("activity_task_slots_info should be set", describedHb.hasActivityTaskSlotsInfo());
+    assertTrue("local_activity_slots_info should be set", describedHb.hasLocalActivitySlotsInfo());
+    assertTrue("nexus_task_slots_info should be set", describedHb.hasNexusTaskSlotsInfo());
+
+    assertFalse(
+        "workflow slot supplier kind should be set",
+        describedHb.getWorkflowTaskSlotsInfo().getSlotSupplierKind().isEmpty());
+    assertFalse(
+        "activity slot supplier kind should be set",
+        describedHb.getActivityTaskSlotsInfo().getSlotSupplierKind().isEmpty());
+
     assertEquals(
-        "plugins list should be empty when no plugins are configured", 0, hb.getPluginsCount());
+        "workflow used slots should be 0 after completion",
+        0,
+        describedHb.getWorkflowTaskSlotsInfo().getCurrentUsedSlots());
+    assertEquals(
+        "activity used slots should be 0 after completion",
+        0,
+        describedHb.getActivityTaskSlotsInfo().getCurrentUsedSlots());
+
+    assertTrue(
+        "workflow available slots should be > 0",
+        describedHb.getWorkflowTaskSlotsInfo().getCurrentAvailableSlots() > 0);
+    assertTrue(
+        "activity available slots should be > 0",
+        describedHb.getActivityTaskSlotsInfo().getCurrentAvailableSlots() > 0);
+
+    // --- Task counters ---
+    boolean foundWorkflowProcessed =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(
+                h ->
+                    h.hasWorkflowTaskSlotsInfo()
+                        && h.getWorkflowTaskSlotsInfo().getTotalProcessedTasks() >= 1);
+    assertTrue(
+        "workflow_task_slots_info.total_processed_tasks should be >= 1", foundWorkflowProcessed);
+
+    boolean foundActivityProcessed =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(
+                h ->
+                    h.hasActivityTaskSlotsInfo()
+                        && h.getActivityTaskSlotsInfo().getTotalProcessedTasks() >= 1);
+    assertTrue(
+        "activity_task_slots_info.total_processed_tasks should be >= 1", foundActivityProcessed);
+
+    // --- Poller info ---
+    boolean foundWorkflowPollers =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(
+                h ->
+                    h.hasWorkflowPollerInfo() && h.getWorkflowPollerInfo().getCurrentPollers() > 0);
+    assertTrue("workflow_poller_info should have current_pollers > 0", foundWorkflowPollers);
+
+    boolean foundActivityPollers =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(
+                h ->
+                    h.hasActivityPollerInfo() && h.getActivityPollerInfo().getCurrentPollers() > 0);
+    assertTrue("activity_poller_info should have current_pollers > 0", foundActivityPollers);
+
+    boolean foundNexusPollerInfo =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(WorkerHeartbeat::hasNexusPollerInfo);
+    assertTrue("nexus_poller_info should be set", foundNexusPollerInfo);
+
+    boolean foundWorkflowPollTime =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(
+                h ->
+                    h.hasWorkflowPollerInfo()
+                        && h.getWorkflowPollerInfo().hasLastSuccessfulPollTime());
+    assertTrue(
+        "workflow_poller_info should have last_successful_poll_time set", foundWorkflowPollTime);
+
+    boolean foundActivityPollTime =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(
+                h ->
+                    h.hasActivityPollerInfo()
+                        && h.getActivityPollerInfo().hasLastSuccessfulPollTime());
+    assertTrue(
+        "activity_poller_info should have last_successful_poll_time set", foundActivityPollTime);
+
+    boolean foundWorkflowAutoscaling =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(
+                h -> h.hasWorkflowPollerInfo() && h.getWorkflowPollerInfo().getIsAutoscaling());
+    assertFalse(
+        "workflow_poller_info.is_autoscaling should be false with default pollers",
+        foundWorkflowAutoscaling);
+
+    boolean foundActivityAutoscaling =
+        requests.stream()
+            .flatMap(req -> req.getWorkerHeartbeatList().stream())
+            .anyMatch(
+                h -> h.hasActivityPollerInfo() && h.getActivityPollerInfo().getIsAutoscaling());
+    assertFalse(
+        "activity_poller_info.is_autoscaling should be false with default pollers",
+        foundActivityAutoscaling);
   }
 
   @Test
