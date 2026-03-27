@@ -31,6 +31,7 @@ import io.temporal.worker.tuning.WorkflowSlotInfo;
 import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.Test;
 import org.mockito.stubbing.Answer;
 import org.slf4j.Logger;
@@ -69,6 +70,8 @@ public class WorkflowWorkerTest {
             client,
             "default",
             "task_queue",
+            "test-worker-instance-key",
+            java.util.Collections.emptyList(),
             "sticky_task_queue",
             SingleWorkerOptions.newBuilder()
                 .setIdentity("test_identity")
@@ -83,7 +86,8 @@ public class WorkflowWorkerTest {
             cache,
             taskHandler,
             eagerActivityDispatcher,
-            slotSupplier);
+            slotSupplier,
+            new AtomicBoolean(false));
 
     WorkflowServiceGrpc.WorkflowServiceFutureStub futureStub =
         mock(WorkflowServiceGrpc.WorkflowServiceFutureStub.class);
@@ -238,6 +242,8 @@ public class WorkflowWorkerTest {
             client,
             "default",
             "task_queue",
+            "test-worker-instance-key",
+            java.util.Collections.emptyList(),
             "sticky_task_queue",
             SingleWorkerOptions.newBuilder()
                 .setIdentity("test_identity")
@@ -252,7 +258,8 @@ public class WorkflowWorkerTest {
             cache,
             taskHandler,
             eagerActivityDispatcher,
-            slotSupplier);
+            slotSupplier,
+            new AtomicBoolean(false));
 
     WorkflowServiceGrpc.WorkflowServiceFutureStub futureStub =
         mock(WorkflowServiceGrpc.WorkflowServiceFutureStub.class);
@@ -380,6 +387,8 @@ public class WorkflowWorkerTest {
             client,
             "default",
             "taskQueue",
+            "test-worker-instance-key",
+            java.util.Collections.emptyList(),
             "sticky",
             SingleWorkerOptions.newBuilder()
                 .setIdentity("test_identity")
@@ -394,11 +403,18 @@ public class WorkflowWorkerTest {
             cache,
             taskHandler,
             eagerActivityDispatcher,
-            slotSupplier);
+            slotSupplier,
+            new AtomicBoolean(false));
+
+    WorkflowServiceGrpc.WorkflowServiceFutureStub futureStub =
+        mock(WorkflowServiceGrpc.WorkflowServiceFutureStub.class);
+    when(futureStub.shutdownWorker(any(ShutdownWorkerRequest.class)))
+        .thenReturn(Futures.immediateFuture(ShutdownWorkerResponse.newBuilder().build()));
 
     WorkflowServiceGrpc.WorkflowServiceBlockingStub blockingStub =
         mock(WorkflowServiceGrpc.WorkflowServiceBlockingStub.class);
     when(client.blockingStub()).thenReturn(blockingStub);
+    when(client.futureStub()).thenReturn(futureStub);
     when(blockingStub.withOption(any(), any())).thenReturn(blockingStub);
 
     PollWorkflowTaskQueueResponse pollResponse =

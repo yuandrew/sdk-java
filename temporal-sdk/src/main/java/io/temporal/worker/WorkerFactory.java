@@ -31,6 +31,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -59,6 +60,9 @@ public final class WorkerFactory {
 
   /** Plugins propagated from the client and applied to this factory. */
   private final List<WorkerPlugin> plugins;
+
+  /** Set during start() if the namespace has the poller_autoscaling capability. */
+  private final AtomicBoolean pollerAutoscaling = new AtomicBoolean(false);
 
   private State state = State.Initial;
   private boolean heartbeatsSupported;
@@ -197,7 +201,8 @@ public final class WorkerFactory {
               true,
               workflowThreadExecutor,
               workflowClient.getOptions().getContextPropagators(),
-              plugins);
+              plugins,
+              pollerAutoscaling);
       workers.put(taskQueue, worker);
 
       // Go through the plugins to call plugin initializeWorker hooks (e.g. register workflows,
@@ -256,7 +261,7 @@ public final class WorkerFactory {
 
     // Workers check and require that Temporal Server is available during start to fail-fast in case
     // of configuration issues.
-    DescribeNamespaceResponse describeResponse =
+    DescribeNamespaceResponse describeNamespaceResponse =
         workflowClient
             .getWorkflowServiceStubs()
             .blockingStub()
@@ -266,13 +271,17 @@ public final class WorkerFactory {
                     .build());
 
     boolean heartbeatsSupported =
-        describeResponse.getNamespaceInfo().getCapabilities().getWorkerHeartbeats();
+        describeNamespaceResponse.getNamespaceInfo().getCapabilities().getWorkerHeartbeats();
     if (!heartbeatsSupported) {
       log.debug(
           "Server does not support worker heartbeats for namespace {}",
           workflowClient.getOptions().getNamespace());
     }
     this.heartbeatsSupported = heartbeatsSupported;
+
+    if (describeNamespaceResponse.getNamespaceInfo().getCapabilities().getPollerAutoscaling()) {
+      pollerAutoscaling.set(true);
+    }
 
     // Build plugin execution chain (reverse order for proper nesting)
     Consumer<WorkerFactory> startChain = WorkerFactory::doStart;

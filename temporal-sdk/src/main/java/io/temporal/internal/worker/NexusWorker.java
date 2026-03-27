@@ -8,10 +8,13 @@ import com.uber.m3.tally.Scope;
 import com.uber.m3.tally.Stopwatch;
 import com.uber.m3.util.Duration;
 import com.uber.m3.util.ImmutableMap;
-import io.temporal.api.nexus.v1.HandlerError;
-import io.temporal.api.nexus.v1.Request;
-import io.temporal.api.nexus.v1.Response;
+import io.nexusrpc.OperationState;
+import io.nexusrpc.handler.HandlerException;
+import io.temporal.api.failure.v1.Failure;
+import io.temporal.api.nexus.v1.*;
 import io.temporal.api.workflowservice.v1.*;
+import io.temporal.common.converter.DataConverter;
+import io.temporal.internal.common.NexusUtil;
 import io.temporal.internal.common.ProtobufTimeUtils;
 import io.temporal.internal.logging.LoggerTag;
 import io.temporal.internal.retryer.GrpcRetryer;
@@ -27,7 +30,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.annotation.Nonnull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,12 +49,12 @@ final class NexusWorker implements SuspendableWorker {
   private final SingleWorkerOptions options;
   private final PollerOptions pollerOptions;
   private final Scope workerMetricsScope;
+  private final DataConverter dataConverter;
   private final GrpcRetryer grpcRetryer;
   private final GrpcRetryer.GrpcRetryerOptions replyGrpcRetryerOptions;
   private final TrackingSlotSupplier<NexusSlotInfo> slotSupplier;
-  private final AtomicInteger totalProcessedTasks = new AtomicInteger();
-  private final AtomicInteger totalFailedTasks = new AtomicInteger();
-  private final PollerTracker pollerTracker = new PollerTracker();
+  private final AtomicBoolean serverSupportsAutoscaling;
+  private final boolean forceOldFailureFormat;
 
   public NexusWorker(
       @Nonnull WorkflowServiceStubs service,
@@ -59,11 +62,14 @@ final class NexusWorker implements SuspendableWorker {
       @Nonnull String taskQueue,
       @Nonnull SingleWorkerOptions options,
       @Nonnull NexusTaskHandler handler,
-      @Nonnull SlotSupplier<NexusSlotInfo> slotSupplier) {
+      @Nonnull DataConverter dataConverter,
+      @Nonnull SlotSupplier<NexusSlotInfo> slotSupplier,
+      @Nonnull AtomicBoolean serverSupportsAutoscaling) {
     this.service = Objects.requireNonNull(service);
     this.namespace = Objects.requireNonNull(namespace);
     this.taskQueue = Objects.requireNonNull(taskQueue);
     this.handler = Objects.requireNonNull(handler);
+    this.dataConverter = Objects.requireNonNull(dataConverter);
     this.options = Objects.requireNonNull(options);
     this.pollerOptions = getPollerOptions(options);
     this.workerMetricsScope =
@@ -74,6 +80,10 @@ final class NexusWorker implements SuspendableWorker {
             DefaultStubServiceOperationRpcRetryOptions.INSTANCE, null);
 
     this.slotSupplier = new TrackingSlotSupplier<>(slotSupplier, this.workerMetricsScope);
+    this.serverSupportsAutoscaling = serverSupportsAutoscaling;
+    // Allow tests to force old format for backward compatibility testing
+    String forceOldFormat = System.getProperty("temporal.nexus.forceOldFailureFormat");
+    this.forceOldFailureFormat = "true".equalsIgnoreCase(forceOldFormat);
   }
 
   @Override
@@ -103,10 +113,10 @@ final class NexusWorker implements SuspendableWorker {
                     options.getWorkerVersioningOptions(),
                     workerMetricsScope,
                     service.getServerCapabilities(),
-                    this.slotSupplier,
-                    pollerTracker),
+                    this.slotSupplier),
                 this.pollTaskExecutor,
                 pollerOptions,
+                serverSupportsAutoscaling.get(),
                 workerMetricsScope);
       } else {
         poller =
@@ -120,8 +130,7 @@ final class NexusWorker implements SuspendableWorker {
                     options.getWorkerVersioningOptions(),
                     this.slotSupplier,
                     workerMetricsScope,
-                    service.getServerCapabilities(),
-                    pollerTracker),
+                    service.getServerCapabilities()),
                 this.pollTaskExecutor,
                 pollerOptions,
                 workerMetricsScope);
@@ -205,26 +214,6 @@ final class NexusWorker implements SuspendableWorker {
     return pollerOptions;
   }
 
-  public TrackingSlotSupplier<NexusSlotInfo> getSlotSupplier() {
-    return slotSupplier;
-  }
-
-  public AtomicInteger getTotalProcessedTasks() {
-    return totalProcessedTasks;
-  }
-
-  public AtomicInteger getTotalFailedTasks() {
-    return totalFailedTasks;
-  }
-
-  public PollerOptions getPollerOptions() {
-    return pollerOptions;
-  }
-
-  public PollerTracker getPollerTracker() {
-    return pollerTracker;
-  }
-
   @Override
   public String toString() {
     return String.format(
@@ -283,14 +272,7 @@ final class NexusWorker implements SuspendableWorker {
           task.getPermit());
 
       try {
-        boolean nexusTaskFailed = handleNexusTask(task, metricsScope);
-        totalProcessedTasks.incrementAndGet();
-        if (nexusTaskFailed) {
-          totalFailedTasks.incrementAndGet();
-        }
-      } catch (RuntimeException e) {
-        totalFailedTasks.incrementAndGet();
-        throw e;
+        handleNexusTask(task, metricsScope);
       } finally {
         task.getCompletionCallback().apply();
         MDC.remove(LoggerTag.NEXUS_SERVICE);
@@ -305,31 +287,41 @@ final class NexusWorker implements SuspendableWorker {
           "Failure processing nexus response: " + response.getRequest().toString(), failure);
     }
 
-    /** Returns true if the nexus task completed with a failure. */
-    private boolean handleNexusTask(NexusTask task, Scope metricsScope) {
+    @SuppressWarnings("deprecation") // Uses deprecated operationError
+    private void handleNexusTask(NexusTask task, Scope metricsScope) {
       PollNexusTaskQueueResponseOrBuilder pollResponse = task.getResponse();
       ByteString taskToken = pollResponse.getTaskToken();
 
       NexusTaskHandler.Result result;
-      boolean failed = false;
 
       Stopwatch sw = metricsScope.timer(MetricsType.NEXUS_EXEC_LATENCY).start();
       try {
         result = handler.handle(task, metricsScope);
-        if (result.getHandlerError() != null) {
-          failed = true;
+        if (result.getHandlerException() != null) {
           metricsScope
               .tagged(
                   Collections.singletonMap(
                       TASK_FAILURE_TYPE,
-                      "handler_error_" + result.getHandlerError().getErrorType()))
+                      "handler_error_" + result.getHandlerException().getErrorType()))
               .counter(MetricsType.NEXUS_EXEC_FAILED_COUNTER)
               .inc(1);
         } else if (result.getResponse().hasStartOperation()
             && result.getResponse().getStartOperation().hasOperationError()) {
-          failed = true;
           String operationState =
               result.getResponse().getStartOperation().getOperationError().getOperationState();
+          metricsScope
+              .tagged(Collections.singletonMap(TASK_FAILURE_TYPE, "operation_" + operationState))
+              .counter(MetricsType.NEXUS_EXEC_FAILED_COUNTER)
+              .inc(1);
+        } else if (result.getResponse().hasStartOperation()
+            && result.getResponse().getStartOperation().hasFailure()) {
+          Failure f = result.getResponse().getStartOperation().getFailure();
+          String operationState;
+          if (f.hasApplicationFailureInfo()) {
+            operationState = "failed";
+          } else {
+            operationState = "canceled";
+          }
           metricsScope
               .tagged(Collections.singletonMap(TASK_FAILURE_TYPE, "operation_" + operationState))
               .counter(MetricsType.NEXUS_EXEC_FAILED_COUNTER)
@@ -341,7 +333,7 @@ final class NexusWorker implements SuspendableWorker {
             .tagged(Collections.singletonMap(TASK_FAILURE_TYPE, "timeout"))
             .counter(MetricsType.NEXUS_EXEC_FAILED_COUNTER)
             .inc(1);
-        return true;
+        return;
       } catch (Throwable e) {
         metricsScope
             .tagged(Collections.singletonMap(TASK_FAILURE_TYPE, "internal_sdk_error"))
@@ -356,7 +348,14 @@ final class NexusWorker implements SuspendableWorker {
       }
 
       try {
-        sendReply(taskToken, result, metricsScope);
+        // Check if the server supports using the Failure directly in responses
+        boolean supportTemporalFailure =
+            task.getResponse().getRequest().getCapabilities().getTemporalFailureResponses();
+        if (forceOldFailureFormat) {
+          supportTemporalFailure = false;
+        }
+
+        sendReply(taskToken, supportTemporalFailure, result, metricsScope);
       } catch (Exception e) {
         logExceptionDuringResultReporting(e, pollResponse, result);
         throw e;
@@ -365,7 +364,6 @@ final class NexusWorker implements SuspendableWorker {
       Duration e2eDuration =
           ProtobufTimeUtils.toM3DurationSinceNow(pollResponse.getRequest().getScheduledTime());
       metricsScope.timer(MetricsType.NEXUS_TASK_E2E_LATENCY).record(e2eDuration);
-      return failed;
     }
 
     private void logExceptionDuringResultReporting(
@@ -382,10 +380,41 @@ final class NexusWorker implements SuspendableWorker {
       }
     }
 
+    @SuppressWarnings("deprecation") // Uses deprecated setOperationError
+    private Response getResponseForOldServer(Response response) {
+      Response.Builder b = response.toBuilder();
+      Failure failure = response.getStartOperation().getFailure();
+      String operationState;
+      if (failure.hasApplicationFailureInfo()) {
+        operationState = OperationState.FAILED.toString().toLowerCase();
+      } else if (failure.hasCanceledFailureInfo()) {
+        operationState = OperationState.CANCELED.toString().toLowerCase();
+      } else {
+        throw new IllegalArgumentException(
+            "[BUG] Failure must have either ApplicationFailureInfo or CanceledFailureInfo");
+      }
+      return b.setStartOperation(
+              response.getStartOperation().toBuilder()
+                  .setOperationError(
+                      UnsuccessfulOperationError.newBuilder()
+                          .setOperationState(operationState)
+                          .setFailure(NexusUtil.temporalFailureToNexusFailure(failure.getCause()))))
+          .build();
+    }
+
+    @SuppressWarnings("deprecation") // Uses setError() for backward compat with old servers
     private void sendReply(
-        ByteString taskToken, NexusTaskHandler.Result response, Scope metricsScope) {
+        ByteString taskToken,
+        boolean supportTemporalFailure,
+        NexusTaskHandler.Result response,
+        Scope metricsScope) {
       Response taskResponse = response.getResponse();
       if (taskResponse != null) {
+        // For old servers that do not support TemporalFailure in Failure proto,
+        // we need to convert the Failure to a UnsuccessfulOperationError
+        if (!supportTemporalFailure && taskResponse.getStartOperation().hasFailure()) {
+          taskResponse = getResponseForOldServer(taskResponse);
+        }
         RespondNexusTaskCompletedRequest request =
             RespondNexusTaskCompletedRequest.newBuilder()
                 .setTaskToken(taskToken)
@@ -402,22 +431,24 @@ final class NexusWorker implements SuspendableWorker {
                     .respondNexusTaskCompleted(request),
             replyGrpcRetryerOptions);
       } else {
-        HandlerError taskFailed = response.getHandlerError();
-        if (taskFailed != null) {
-          RespondNexusTaskFailedRequest request =
+        HandlerException handlerException = response.getHandlerException();
+        if (handlerException != null) {
+          RespondNexusTaskFailedRequest.Builder request =
               RespondNexusTaskFailedRequest.newBuilder()
                   .setTaskToken(taskToken)
                   .setIdentity(options.getIdentity())
-                  .setNamespace(namespace)
-                  .setError(taskFailed)
-                  .build();
-
+                  .setNamespace(namespace);
+          if (supportTemporalFailure) {
+            request.setFailure(dataConverter.exceptionToFailure(handlerException));
+          } else {
+            request.setError(NexusUtil.handlerErrorToNexusError(handlerException, dataConverter));
+          }
           grpcRetryer.retry(
               () ->
                   service
                       .blockingStub()
                       .withOption(METRICS_TAGS_CALL_OPTIONS_KEY, metricsScope)
-                      .respondNexusTaskFailed(request),
+                      .respondNexusTaskFailed(request.build()),
               replyGrpcRetryerOptions);
         } else {
           throw new IllegalArgumentException("[BUG] Either response or failure must be set");
