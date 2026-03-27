@@ -12,6 +12,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nonnull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -155,11 +156,11 @@ public class SyncActivityWorker implements SuspendableWorker {
     return worker.getSlotSupplier();
   }
 
-  public java.util.concurrent.atomic.AtomicInteger getTotalProcessedTasks() {
+  public AtomicInteger getTotalProcessedTasks() {
     return worker.getTotalProcessedTasks();
   }
 
-  public java.util.concurrent.atomic.AtomicInteger getTotalFailedTasks() {
+  public AtomicInteger getTotalFailedTasks() {
     return worker.getTotalFailedTasks();
   }
 

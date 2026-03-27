@@ -40,7 +40,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -65,12 +65,12 @@ public final class Worker {
   final SyncNexusWorker nexusWorker;
   private final AtomicBoolean started = new AtomicBoolean();
   private volatile boolean shuttingDown = false;
+  private boolean hasNexusServices = false;
   private final String workerInstanceKey = UUID.randomUUID().toString();
   private final Instant startTime = Instant.now();
   private final WorkflowClientOptions clientOptions;
   private final @Nonnull WorkflowExecutorCache cache;
-  private final ConcurrentHashMap<String, TaskSnapshot> previousSnapshots =
-      new ConcurrentHashMap<>();
+  private final Map<String, TaskSnapshot> previousSnapshots = new HashMap<>();
 
   /**
    * Creates worker that connects to an instance of the Temporal Service.
@@ -439,6 +439,7 @@ public final class Worker {
         !started.get(),
         "registerNexusServiceImplementation is not allowed after worker has started");
     nexusWorker.registerNexusServiceImplementation(nexusServiceImplementations);
+    hasNexusServices = true;
   }
 
   void start() {
@@ -496,7 +497,9 @@ public final class Worker {
     if (activityWorker != null) {
       types.add(TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY);
     }
-    types.add(TaskQueueType.TASK_QUEUE_TYPE_NEXUS);
+    if (hasNexusServices) {
+      types.add(TaskQueueType.TASK_QUEUE_TYPE_NEXUS);
+    }
     return types;
   }
 
