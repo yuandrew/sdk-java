@@ -25,14 +25,10 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import org.junit.Assume;
 import org.junit.Rule;
 import org.junit.Test;
 
 public class WorkerHeartbeatIntegrationTest {
-
-  private static final String SKIP_MSG =
-      "No heartbeats captured — test server may not support worker heartbeat capability";
 
   private static final HeartbeatCapturingInterceptor interceptor =
       new HeartbeatCapturingInterceptor();
@@ -83,8 +79,8 @@ public class WorkerHeartbeatIntegrationTest {
     Thread.sleep(3000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
-    Assume.assumeFalse(SKIP_MSG + " (need >= 2 heartbeats)", requests.size() < 2);
+    assertFalse("no heartbeats captured", requests.isEmpty());
+    assertTrue("need >= 2 heartbeats", requests.size() >= 2);
     String workerInstanceKey = requests.get(0).getWorkerHeartbeat(0).getWorkerInstanceKey();
 
     // --- RPC fields via DescribeWorker round-trip ---
@@ -175,7 +171,7 @@ public class WorkerHeartbeatIntegrationTest {
     factory.awaitTermination(10, TimeUnit.SECONDS);
 
     List<ShutdownWorkerRequest> shutdownRequests = interceptor.getShutdownRequests();
-    Assume.assumeFalse(SKIP_MSG, shutdownRequests.isEmpty());
+    assertFalse("no shutdown requests captured", shutdownRequests.isEmpty());
 
     // Find the shutdown request for our task queue
     ShutdownWorkerRequest shutdownReq =
@@ -229,7 +225,7 @@ public class WorkerHeartbeatIntegrationTest {
     Thread.sleep(2000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    assertFalse("no heartbeats captured", requests.isEmpty());
     String workerInstanceKey = requests.get(0).getWorkerHeartbeat(0).getWorkerInstanceKey();
 
     // --- Slot info via DescribeWorker ---
@@ -369,7 +365,7 @@ public class WorkerHeartbeatIntegrationTest {
     Thread.sleep(2000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    assertFalse("no heartbeats captured", requests.isEmpty());
 
     // ApplicationFailure is handled within the activity handler and returned as a result,
     // so it counts as a processed task, not a failed task. "Failed tasks" tracks
@@ -406,7 +402,7 @@ public class WorkerHeartbeatIntegrationTest {
     Thread.sleep(2000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    assertFalse("no heartbeats captured", requests.isEmpty());
 
     long maxProcessed =
         requests.stream()
@@ -447,7 +443,7 @@ public class WorkerHeartbeatIntegrationTest {
     Thread.sleep(2000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    assertFalse("no heartbeats captured", requests.isEmpty());
 
     // While the activity is running, at least one heartbeat should show used slots >= 1
     boolean foundUsedSlot =
@@ -497,7 +493,7 @@ public class WorkerHeartbeatIntegrationTest {
     Thread.sleep(2000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    assertFalse("no heartbeats captured", requests.isEmpty());
     String workerInstanceKey = requests.get(0).getWorkerHeartbeat(0).getWorkerInstanceKey();
 
     WorkerHeartbeat hb = describeWorker(workerInstanceKey);
@@ -551,7 +547,7 @@ public class WorkerHeartbeatIntegrationTest {
     Thread.sleep(2000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    assertFalse("no heartbeats captured", requests.isEmpty());
 
     boolean foundCacheMiss =
         requests.stream()
@@ -586,7 +582,7 @@ public class WorkerHeartbeatIntegrationTest {
     Thread.sleep(4000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.size() < 3);
+    assertTrue("need >= 3 heartbeats", requests.size() >= 3);
 
     // Find a heartbeat with interval processed > 0
     boolean foundNonZeroInterval =
@@ -638,7 +634,7 @@ public class WorkerHeartbeatIntegrationTest {
     Thread.sleep(3000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    assertFalse("no heartbeats captured", requests.isEmpty());
 
     // Workers may be in separate requests (different HeartbeatManagers), so search across all
     WorkerHeartbeat hb1 =
@@ -714,7 +710,7 @@ public class WorkerHeartbeatIntegrationTest {
     Thread.sleep(3000);
 
     List<RecordWorkerHeartbeatRequest> requests = interceptor.getHeartbeatRequests();
-    Assume.assumeFalse(SKIP_MSG, requests.isEmpty());
+    assertFalse("no heartbeats captured", requests.isEmpty());
 
     // Find the heartbeat for the resource-based worker
     WorkerHeartbeat hb =
@@ -723,7 +719,7 @@ public class WorkerHeartbeatIntegrationTest {
             .filter(h -> h.getTaskQueue().equals(testWorkflowRule.getTaskQueue() + "-resource"))
             .findFirst()
             .orElse(null);
-    Assume.assumeTrue("should find heartbeat for resource-based worker", hb != null);
+    assertNotNull("should find heartbeat for resource-based worker", hb);
 
     assertEquals(
         "workflow slot supplier kind should be ResourceBased",
